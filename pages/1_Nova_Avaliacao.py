@@ -34,9 +34,36 @@ if st.session_state.pop("_resetar_form", False):
     for _k in list(st.session_state.keys()):
         if _k in _RESET_EXATOS or _k.startswith(_RESET_PREFIXOS):
             del st.session_state[_k]
+    # Limpa o id do rascunho da URL — uma nova avaliação deve começar do zero.
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
 
 # ============================================================================
-# EDIÇÃO (vinda do Histórico) — pré-carrega valores
+# RECUPERAÇÃO DE EMERGÊNCIA — rascunho via URL (?r=ID)
+# ============================================================================
+# O Streamlit Cloud pode descartar o `session_state` quando o usuário fica
+# inativo (ou o processo do app é reciclado). Para que o usuário não perca
+# o que digitou, o id do rascunho atual também vive na URL como `?r=ID`.
+# Se chegamos aqui sem `edicao` no session_state mas a URL tem `r`, buscamos
+# o rascunho do banco e populamos tudo de volta.
+_qp_r = st.query_params.get("r")
+if _qp_r and not st.session_state.get("edicao"):
+    try:
+        _row = db.obter(int(_qp_r))
+    except Exception:
+        _row = None
+    if _row and _row.get("status") == db.STATUS_RASCUNHO:
+        _dados = _row.get("dados", {}) or {}
+        _dados["_passo_atual"] = _row.get("passo_atual") or 1
+        st.session_state["edicao"] = _dados
+        st.session_state["edicao_id"] = _row["id"]
+        st.session_state.pop("_edic_hidratado", None)
+        st.session_state.pop("wizard_passo", None)
+
+# ============================================================================
+# EDIÇÃO (vinda do Histórico ou da URL) — pré-carrega valores
 # ============================================================================
 edic = st.session_state.get("edicao")
 edic_id = st.session_state.get("edicao_id")
@@ -169,26 +196,31 @@ def _render_campo(campo: dict, prefixo: str) -> None:
     if wkey not in st.session_state and default not in (None, ""):
         st.session_state[wkey] = default
 
+    # on_change roda toda vez que o widget perde foco/submete: salva shadow
+    # E persiste o rascunho no Supabase. Garante que NADA seja perdido se o
+    # session_state for descartado pelo Streamlit Cloud entre interações.
+    _kwargs = {"on_change": _on_change_field, "args": (wkey,)}
+
     if tipo == "number":
         if wkey in st.session_state and not isinstance(st.session_state[wkey], (int, float)):
             try:
                 st.session_state[wkey] = float(st.session_state[wkey])
             except (TypeError, ValueError):
                 st.session_state[wkey] = 0.0
-        st.number_input(label, min_value=0.0, step=1.0, help=ajuda, key=wkey)
+        st.number_input(label, min_value=0.0, step=1.0, help=ajuda, key=wkey, **_kwargs)
     elif tipo == "select":
         opts = campo["opcoes"]
         if wkey not in st.session_state or st.session_state[wkey] not in opts:
             st.session_state[wkey] = opts[0]
-        st.selectbox(label, opts, help=ajuda, key=wkey)
+        st.selectbox(label, opts, help=ajuda, key=wkey, **_kwargs)
     elif tipo == "checkbox":
         if wkey not in st.session_state:
             st.session_state[wkey] = False
-        st.checkbox(label, help=ajuda, key=wkey)
+        st.checkbox(label, help=ajuda, key=wkey, **_kwargs)
     elif tipo == "textarea":
-        st.text_area(label, help=ajuda, key=wkey)
+        st.text_area(label, help=ajuda, key=wkey, **_kwargs)
     else:
-        st.text_input(label, help=ajuda, key=wkey)
+        st.text_input(label, help=ajuda, key=wkey, **_kwargs)
 
     # 3) Espelha o valor atual na shadow. Como `_p_<wkey>` NÃO é uma widget
     #    key, o Streamlit não faz GC dela quando trocamos de passo.
@@ -379,11 +411,32 @@ def _persistir_rascunho() -> None:
         "textos_ia": (st.session_state.get("ultimo_resultado") or {}).get("textos_ia") or {},
         "fotos_imovel": (st.session_state.get("ultimo_resultado") or {}).get("fotos_imovel") or [],
     }
-    novo_id = db.salvar_rascunho(dados_rasc, avaliacao_id=edic_id,
-                                  passo_atual=WZ.passo_atual())
+    try:
+        novo_id = db.salvar_rascunho(dados_rasc, avaliacao_id=edic_id,
+                                      passo_atual=WZ.passo_atual())
+    except Exception as e:
+        # Não bloqueia a digitação se o banco falhar momentaneamente.
+        st.session_state["_rascunho_erro"] = str(e)[:200]
+        return
     st.session_state["edicao_id"] = novo_id
     st.session_state["rascunho_salvo_em"] = datetime.now().strftime("%H:%M")
+    st.session_state.pop("_rascunho_erro", None)
+    # Coloca o id na URL — sobrevive a reload e perda de session_state no Cloud.
+    try:
+        if st.query_params.get("r") != str(novo_id):
+            st.query_params["r"] = str(novo_id)
+    except Exception:
+        pass
     edic_id = novo_id
+
+
+def _on_change_field(wkey: str) -> None:
+    """Callback de qualquer widget de form: salva no shadow e persiste o
+    rascunho no Supabase imediatamente. Garante que cada mudança que dispara
+    um rerun é guardada — não dependemos de session_state em memória."""
+    if wkey in st.session_state:
+        st.session_state[f"_p_{wkey}"] = st.session_state[wkey]
+    _persistir_rascunho()
 
 
 # ============================================================================
