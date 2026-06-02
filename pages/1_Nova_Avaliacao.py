@@ -674,8 +674,14 @@ def render_passo_4():
                 st.session_state["import_rev"] = st.session_state.get("import_rev", 0) + 1
                 st.rerun()
 
-    # Tabela de comparáveis
-    if edic and edic.get("comparaveis") and "_comp_base_carregado" not in st.session_state:
+    # Tabela de comparáveis — origem do df_base, em ordem de prioridade:
+    #   1) `_df_comparaveis` (a fonte da verdade entre runs/passos)
+    #   2) hidratação do histórico (`edic.comparaveis`), uma vez
+    #   3) df padrão de 3 linhas vazias
+    df_persistido = st.session_state.get("_df_comparaveis")
+    if isinstance(df_persistido, pd.DataFrame) and not df_persistido.empty:
+        df_base = df_persistido.copy()
+    elif edic and edic.get("comparaveis") and "_comp_base_carregado" not in st.session_state:
         base_rows = []
         for c in edic["comparaveis"]:
             fat = c.get("fatores", {})
@@ -702,9 +708,13 @@ def render_passo_4():
             "F. Padrão": 1.0, "F. Outros": 1.0,
         } for _ in range(3)])
 
+    # Importações pendentes (IA/CSV/texto) são absorvidas no df_base e a
+    # fila é limpa — assim não viram duplicatas a cada rerun.
     importados = st.session_state.get("comparaveis_importados", [])
     if importados:
         df_base = pd.concat([df_base, pd.DataFrame(importados)], ignore_index=True)
+        st.session_state.pop("comparaveis_importados", None)
+        st.session_state["_df_comparaveis"] = df_base  # já reflete a soma
 
     cols_ocultas = ["F. Área", "F. Conserv."] if auto_fatores else []
     if not tem_conservacao:
