@@ -22,7 +22,7 @@ from core import pdf as PDFGEN
 # ============================================================================
 _RESET_PREFIXOS = (
     "f_", "ia_", "ocr", "editor_comparaveis", "rmfoto_", "csv_", "txt_", "btn_",
-    "step_btn_", "nav_", "wizard_", "_pend_",
+    "step_btn_", "nav_", "wizard_", "_pend_", "_p_",
 )
 _RESET_EXATOS = {
     "edicao", "edicao_id", "ultimo_resultado", "ultimo_resultado_obj",
@@ -52,14 +52,18 @@ if edic and not st.session_state.get("_edic_hidratado"):
         for campo in grupo["campos"]:
             v = edic_imovel.get(campo["key"])
             if v not in (None, ""):
-                st.session_state[f"f_ident_{campo['key']}"] = v
+                wk = f"f_ident_{campo['key']}"
+                st.session_state[wk] = v
+                st.session_state[f"_p_{wk}"] = v  # shadow para sobreviver entre passos
     if edic_tipo and edic_tipo in TI.TIPOS_IMOVEL:
         for grupo in TI.get_tipo(edic_tipo)["grupos"]:
             if grupo["titulo"].lower().startswith("caracter"):
                 for campo in grupo["campos"]:
                     v = edic_imovel.get(campo["key"])
                     if v not in (None, ""):
-                        st.session_state[f"f_{edic_tipo}_{campo['key']}"] = v
+                        wk = f"f_{edic_tipo}_{campo['key']}"
+                        st.session_state[wk] = v
+                        st.session_state[f"_p_{wk}"] = v
     # Reabrir no passo onde a avaliação parou (rascunho) ou no resumo (concluída)
     st.session_state.setdefault("wizard_passo", int(edic.get("_passo_atual") or 5))
     st.session_state["_edic_hidratado"] = True
@@ -71,7 +75,11 @@ if edic and not st.session_state.get("_edic_hidratado"):
 # com aquela key foi instanciado no run atual.)
 for _pk in [k for k in list(st.session_state.keys()) if k.startswith("_pend_")]:
     _target = _pk[len("_pend_"):]
-    st.session_state[_target] = st.session_state.pop(_pk)
+    _val = st.session_state.pop(_pk)
+    st.session_state[_target] = _val
+    # Espelha na shadow se for widget de form (f_*), para sobreviver a passos
+    if _target.startswith("f_"):
+        st.session_state[f"_p_{_target}"] = _val
 
 st.title("📝 Nova avaliação")
 if edic_id:
@@ -92,18 +100,32 @@ tipo_def = TI.get_tipo(tipo_key)
 # ============================================================================
 # Helpers
 # ============================================================================
+def _get_field(wkey: str):
+    """Lê valor do session_state, com fallback para a "shadow key" `_p_<wkey>`.
+
+    Streamlit faz GC do session_state[wkey] quando o widget não é renderizado
+    em um run (caso típico no wizard: estamos no passo 4 e os widgets do passo
+    1 não existem neste run). A shadow key NÃO é uma widget key — por isso
+    o Streamlit não a apaga, e podemos restaurar a partir dela.
+    """
+    v = st.session_state.get(wkey)
+    if v in (None, "", 0, False):
+        v = st.session_state.get(f"_p_{wkey}")
+    return v
+
+
 def _construir_imovel() -> dict:
-    """Lê o session_state e retorna o dict do imóvel (todos os campos)."""
+    """Lê o session_state (com fallback pra shadow) e retorna o dict do imóvel."""
     imovel = {}
     for grupo in [TI.GRUPO_IDENTIFICACAO, TI.GRUPO_LOCALIZACAO]:
         for campo in grupo["campos"]:
-            v = st.session_state.get(f"f_ident_{campo['key']}")
+            v = _get_field(f"f_ident_{campo['key']}")
             if v not in (None, "", 0, False):
                 imovel[campo["key"]] = v
     for grupo in tipo_def["grupos"]:
         if grupo["titulo"].lower().startswith("caracter"):
             for campo in grupo["campos"]:
-                v = st.session_state.get(f"f_{tipo_key}_{campo['key']}")
+                v = _get_field(f"f_{tipo_key}_{campo['key']}")
                 if v not in (None, "", 0, False):
                     imovel[campo["key"]] = v
     return imovel
@@ -125,16 +147,25 @@ def _imovel_detalhado(imovel: dict) -> list:
 
 
 def _render_campo(campo: dict, prefixo: str) -> None:
-    """Renderiza um campo do form; valor fica em session_state[wkey]."""
+    """Renderiza um campo do form; valor fica em session_state[wkey] e é
+    espelhado em `_p_<wkey>` (shadow) para sobreviver a passos onde o widget
+    não é renderizado (Streamlit faz GC dos values dos widgets sumiram do tree)."""
     key = campo["key"]
     label = campo["label"] + (" *" if campo.get("obrigatorio") else "")
     if campo.get("unidade"):
         label += f" ({campo['unidade']})"
     ajuda = campo.get("ajuda")
     wkey = f"{prefixo}_{key}"
+    pkey = f"_p_{wkey}"
     tipo = campo["tipo"]
     default = campo.get("default")
-    # Se o session_state ainda não tem essa key, semeamos com o default.
+
+    # 1) Restaura da shadow se o widget está vindo sem valor neste run
+    #    (típico após o GC do Streamlit ao trocar de passo).
+    if wkey not in st.session_state and pkey in st.session_state:
+        st.session_state[wkey] = st.session_state[pkey]
+
+    # 2) Se ainda não há valor, semeia com o default.
     if wkey not in st.session_state and default not in (None, ""):
         st.session_state[wkey] = default
 
@@ -158,6 +189,11 @@ def _render_campo(campo: dict, prefixo: str) -> None:
         st.text_area(label, help=ajuda, key=wkey)
     else:
         st.text_input(label, help=ajuda, key=wkey)
+
+    # 3) Espelha o valor atual na shadow. Como `_p_<wkey>` NÃO é uma widget
+    #    key, o Streamlit não faz GC dela quando trocamos de passo.
+    if wkey in st.session_state:
+        st.session_state[pkey] = st.session_state[wkey]
 
 
 def _rotulo_campo(key: str) -> str:
@@ -234,7 +270,7 @@ def _render_sugestoes_ocr() -> None:
     for k in list(sugest.keys()):
         valor_ia = sugest[k]
         rotulo = _rotulo_campo(k)
-        atual = st.session_state.get(f"{_prefixo_widget(k)}_{k}")
+        atual = _get_field(f"{_prefixo_widget(k)}_{k}")
         atual_str = "" if atual in (None, "", 0, 0.0, False) else str(atual)
         with st.container(border=True):
             st.markdown(f"**{rotulo}**")
@@ -272,7 +308,7 @@ def _render_busca_cep(campo_cep: dict) -> None:
                            key="btn_busca_cep")
     if not clicou:
         return
-    cep_val = (st.session_state.get("f_ident_cep") or "").strip()
+    cep_val = (_get_field("f_ident_cep") or "").strip()
     if not cep_val:
         st.warning("Digite um CEP antes de buscar.")
         return
@@ -299,13 +335,13 @@ def _autopreencher_geo() -> None:
     Roda no passo 1, no fim do bloco de Localização. Não repete a busca para
     os mesmos inputs (cache em `_geo_auto_tentado`).
     """
-    if (st.session_state.get("f_ident_geo") or "").strip():
+    if (_get_field("f_ident_geo") or "").strip():
         return  # geo já preenchido (manual, CEP ou auto anterior)
-    cep = (st.session_state.get("f_ident_cep") or "").strip()
-    logr = (st.session_state.get("f_ident_endereco") or "").strip()
-    num = (st.session_state.get("f_ident_numero") or "").strip()
-    bairro = (st.session_state.get("f_ident_bairro") or "").strip()
-    cidade = (st.session_state.get("f_ident_cidade_uf") or "").strip()
+    cep = (_get_field("f_ident_cep") or "").strip()
+    logr = (_get_field("f_ident_endereco") or "").strip()
+    num = (_get_field("f_ident_numero") or "").strip()
+    bairro = (_get_field("f_ident_bairro") or "").strip()
+    cidade = (_get_field("f_ident_cidade_uf") or "").strip()
     if not all([cep, logr, num, bairro, cidade]):
         return
     inputs = (cep, logr, num, bairro, cidade)
