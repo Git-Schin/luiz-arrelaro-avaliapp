@@ -957,14 +957,8 @@ def render_passo_5():
     imovel = _construir_imovel()
     st.subheader("Passo 5 · Cálculo & entrega")
 
-    # Validação completa de obrigatórios antes de calcular
-    dados_check = {
-        "tipo_imovel": tipo_key, "imovel": imovel,
-        "comparaveis": [],  # validação do passo 4 será feita logo abaixo
-    }
-    pendencias = WZ.validar_completo(dados_check)
-    # Também valida comparáveis a partir do df do passo 4. Se o session_state
-    # foi descartado, reconstrói o df a partir do rascunho persistido no banco.
+    # Recupera o df do passo 4. Se session_state foi descartado, reconstrói
+    # a partir do rascunho persistido no banco.
     df_edit = st.session_state.get("_df_comparaveis")
     if (df_edit is None or (hasattr(df_edit, "empty") and df_edit.empty)) \
             and edic and edic.get("comparaveis"):
@@ -973,43 +967,30 @@ def render_passo_5():
         )
         st.session_state["_df_comparaveis"] = df_edit
 
-    # Contadores para mensagem específica e debug visível
-    n_total = 0
-    n_com_preco = 0
-    n_com_area = 0
-    n_incluir_marcado = 0
-    comp_validos = 0
+    # Validação completa — passa a lista atual de comparáveis para o wizard
+    # contar corretamente os incluídos (preço > 0, área > 0, incluir = True).
+    comp_list_atual = _df_comparaveis_para_lista(df_edit)
+    dados_check = {
+        "tipo_imovel": tipo_key, "imovel": imovel,
+        "comparaveis": comp_list_atual,
+    }
+    pendencias = WZ.validar_completo(dados_check)
+
+    # Contadores adicionais para o painel de debug (quando há pendência de
+    # comparáveis, queremos mostrar exatamente o que está faltando).
+    n_total = n_com_preco = n_com_area = n_incluir_marcado = 0
     if df_edit is not None and hasattr(df_edit, "iterrows"):
         for _, row in df_edit.iterrows():
             preco = _num(row.get("Preço total (R$)"), 0.0)
             area = _num(row.get("Área (m²)"), 0.0)
-            incluir = bool(row.get("Incluir"))
             if preco > 0 or area > 0 or str(row.get("Descrição") or "").strip():
                 n_total += 1
             if preco > 0:
                 n_com_preco += 1
             if area > 0:
                 n_com_area += 1
-            if incluir:
+            if bool(row.get("Incluir")):
                 n_incluir_marcado += 1
-            if incluir and preco > 0 and area > 0:
-                comp_validos += 1
-
-    if comp_validos == 0:
-        # Mensagem específica de acordo com o motivo
-        if n_total == 0:
-            msg = "Nenhum comparável digitado ainda. Vá no passo 4 e preencha pelo menos 1."
-        elif n_com_preco == 0:
-            msg = f"Você tem {n_total} comparável(is), mas nenhum com **Preço total** preenchido."
-        elif n_com_area == 0:
-            msg = f"Você tem {n_total} comparável(is), mas nenhum com **Área** preenchida."
-        elif n_incluir_marcado == 0:
-            msg = (f"Você tem {n_total} comparável(is) preenchidos, mas nenhum com a "
-                   f"caixinha **Incluir** marcada no passo 4. Marque ao menos 1.")
-        else:
-            msg = ("Ao menos 1 comparável precisa ter **Incluir marcado E** preço E área "
-                   "preenchidos simultaneamente.")
-        pendencias.setdefault(4, []).append(msg)
 
     if pendencias:
         st.warning("Antes de finalizar, ainda faltam preencher:")
