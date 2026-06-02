@@ -972,15 +972,44 @@ def render_passo_5():
             edic["comparaveis"], imovel.get("conservacao") or "Regular"
         )
         st.session_state["_df_comparaveis"] = df_edit
+
+    # Contadores para mensagem específica e debug visível
+    n_total = 0
+    n_com_preco = 0
+    n_com_area = 0
+    n_incluir_marcado = 0
     comp_validos = 0
     if df_edit is not None and hasattr(df_edit, "iterrows"):
         for _, row in df_edit.iterrows():
             preco = _num(row.get("Preço total (R$)"), 0.0)
             area = _num(row.get("Área (m²)"), 0.0)
-            if bool(row.get("Incluir")) and preco > 0 and area > 0:
+            incluir = bool(row.get("Incluir"))
+            if preco > 0 or area > 0 or str(row.get("Descrição") or "").strip():
+                n_total += 1
+            if preco > 0:
+                n_com_preco += 1
+            if area > 0:
+                n_com_area += 1
+            if incluir:
+                n_incluir_marcado += 1
+            if incluir and preco > 0 and area > 0:
                 comp_validos += 1
+
     if comp_validos == 0:
-        pendencias.setdefault(4, []).append("Ao menos 1 comparável incluído com preço e área")
+        # Mensagem específica de acordo com o motivo
+        if n_total == 0:
+            msg = "Nenhum comparável digitado ainda. Vá no passo 4 e preencha pelo menos 1."
+        elif n_com_preco == 0:
+            msg = f"Você tem {n_total} comparável(is), mas nenhum com **Preço total** preenchido."
+        elif n_com_area == 0:
+            msg = f"Você tem {n_total} comparável(is), mas nenhum com **Área** preenchida."
+        elif n_incluir_marcado == 0:
+            msg = (f"Você tem {n_total} comparável(is) preenchidos, mas nenhum com a "
+                   f"caixinha **Incluir** marcada no passo 4. Marque ao menos 1.")
+        else:
+            msg = ("Ao menos 1 comparável precisa ter **Incluir marcado E** preço E área "
+                   "preenchidos simultaneamente.")
+        pendencias.setdefault(4, []).append(msg)
 
     if pendencias:
         st.warning("Antes de finalizar, ainda faltam preencher:")
@@ -992,6 +1021,33 @@ def render_passo_5():
             if c2.button(f"→ Ir ao passo {p_id}", key=f"goto_{p_id}",
                          use_container_width=True):
                 WZ.ir_para(p_id)
+
+        # Debug visível quando há pendência de comparáveis — mostra exatamente
+        # o que o sistema está lendo da tabela do passo 4, para o usuário ver
+        # por que a validação está falhando.
+        if 4 in pendencias:
+            with st.expander("🔍 O que o sistema enxerga na tabela (debug)", expanded=True):
+                st.caption(
+                    f"Linhas com algum dado: **{n_total}** · com Preço: **{n_com_preco}** · "
+                    f"com Área: **{n_com_area}** · com 'Incluir' marcado: **{n_incluir_marcado}**"
+                )
+                if df_edit is not None and hasattr(df_edit, "iterrows") and n_total > 0:
+                    _cols_show = [c for c in ["Descrição", "Incluir",
+                                              "Preço total (R$)", "Área (m²)", "Fonte"]
+                                  if c in df_edit.columns]
+                    _df_show = df_edit[_cols_show].copy()
+                    # Só mostra linhas com algum dado preenchido
+                    _df_show = _df_show[
+                        (_df_show.get("Descrição", "").astype(str).str.strip() != "")
+                        | (_df_show.get("Preço total (R$)", 0).fillna(0) > 0)
+                        | (_df_show.get("Área (m²)", 0).fillna(0) > 0)
+                    ]
+                    if not _df_show.empty:
+                        st.dataframe(_df_show, use_container_width=True, hide_index=True)
+                else:
+                    st.info("A tabela de comparáveis está vazia no momento (do ponto de "
+                            "vista do servidor). Vá no passo 4, preencha pelo menos uma "
+                            "linha (Descrição + Preço + Área) e marque o 'Incluir'.")
 
     pode_calcular = not pendencias
     if st.button("🧮 Calcular avaliação", type="primary", disabled=not pode_calcular):
