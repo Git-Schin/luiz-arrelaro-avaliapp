@@ -365,42 +365,10 @@ def _extrair_lista_json(texto: str) -> list:
 _FONTES_SUGERIDAS = "OLX, ZAP Imóveis, Viva Real, Imovelweb, QuintoAndar, Chaves na Mão"
 
 
-def buscar_comparaveis(imovel: dict, tipo_rotulo: str = "") -> RespostaIA:
-    """
-    Pesquisa anúncios reais de imóveis comparáveis na web (Gemini + Google Search).
-    Retorna `comparaveis` = lista de dicts {descricao, fonte, link, preco_total,
-    area, conservacao, obs} para o usuário REVISAR antes de incluir no cálculo.
-    """
-    prov = _provedor()
-    if not prov or not prov.disponivel():
-        return RespostaIA(False, erro="IA não configurada. Veja como ativar no aviso da página.")
-
-    dados_txt = "\n".join(
-        f"{k}: {v}" for k, v in imovel.items() if v not in (None, "", 0, False)
-    ) or "(poucos dados informados)"
-
-    prompt = (
-        "Pesquise na web ANÚNCIOS REAIS e ATUAIS de imóveis À VENDA comparáveis ao imóvel "
-        f"abaixo (tipo: {tipo_rotulo or 'imóvel'}), na MESMA cidade/bairro ou proximidades, "
-        f"com porte e padrão semelhantes. Priorize os portais: {_FONTES_SUGERIDAS}.\n"
-        "Traga de 5 a 8 comparáveis. Responda APENAS com um ARRAY JSON válido (sem nenhum "
-        "texto fora dele e sem cercas de código). Cada item EXATAMENTE com estas chaves:\n"
-        '{"descricao":"", "fonte":"", "link":"", "preco_total":0, "area":0, '
-        '"conservacao":"", "obs":""}\n'
-        "- preco_total: número em reais, apenas dígitos (sem 'R$' e sem separador de milhar).\n"
-        "- area: número em m² (privativa/útil quando possível), com ponto decimal.\n"
-        "- fonte: nome do portal/origem (ex.: OLX, ZAP, Viva Real, Imobiliária).\n"
-        "- link: URL direta do anúncio.\n"
-        "- conservacao e obs: opcionais (string vazia se não souber).\n"
-        "NÃO invente anúncios nem links. Se não encontrar dados confiáveis, retorne [].\n\n"
-        f"=== IMÓVEL AVALIANDO ===\n{dados_txt}\n"
-    )
-    resp = prov.buscar(prompt, sistema=_SISTEMA_AVALIADOR)
-    if not resp.ok:
-        return resp
-
+def _parse_comparaveis(texto: str) -> list[dict]:
+    """Extrai a lista de comparáveis a partir do texto bruto retornado pela IA."""
     comps = []
-    for it in _extrair_lista_json(resp.texto):
+    for it in _extrair_lista_json(texto):
         if not isinstance(it, dict):
             continue
         preco, area = _num_br(it.get("preco_total")), _num_br(it.get("area"))
@@ -415,11 +383,83 @@ def buscar_comparaveis(imovel: dict, tipo_rotulo: str = "") -> RespostaIA:
             "conservacao": str(it.get("conservacao", "")).strip(),
             "obs": str(it.get("obs", "")).strip(),
         })
+    return comps
+
+
+def buscar_comparaveis(imovel: dict, tipo_rotulo: str = "") -> RespostaIA:
+    """
+    Pesquisa anúncios reais de imóveis comparáveis na web (Gemini + Google Search).
+    Retorna `comparaveis` = lista de dicts {descricao, fonte, link, preco_total,
+    area, conservacao, obs} para o usuário REVISAR antes de incluir no cálculo.
+
+    Estratégia em 2 passos:
+      1) tenta com Google Search grounding (anúncios reais com link)
+      2) se vier vazio ou falhar, refaz SEM grounding — sem links, mas o modelo
+         pode trazer faixas/exemplos de mercado a partir do seu conhecimento.
+    """
+    prov = _provedor()
+    if not prov or not prov.disponivel():
+        return RespostaIA(False, erro="IA não configurada. Veja como ativar no aviso da página.")
+
+    dados_txt = "\n".join(
+        f"{k}: {v}" for k, v in imovel.items() if v not in (None, "", 0, False)
+    ) or "(poucos dados informados)"
+
+    prompt_base = (
+        "Liste ANÚNCIOS de imóveis À VENDA comparáveis ao imóvel abaixo "
+        f"(tipo: {tipo_rotulo or 'imóvel'}), na MESMA cidade/bairro ou proximidades, "
+        f"com porte e padrão semelhantes.\n"
+        "Traga de 5 a 8 comparáveis. Responda APENAS com um ARRAY JSON válido (sem nenhum "
+        "texto fora dele e sem cercas de código). Cada item EXATAMENTE com estas chaves:\n"
+        '{"descricao":"", "fonte":"", "link":"", "preco_total":0, "area":0, '
+        '"conservacao":"", "obs":""}\n'
+        "- preco_total: número em reais, apenas dígitos (sem 'R$' e sem separador de milhar).\n"
+        "- area: número em m² (privativa/útil quando possível), com ponto decimal.\n"
+        "- fonte: nome do portal/origem (ex.: OLX, ZAP, Viva Real, Imobiliária).\n"
+        "- link: URL do anúncio (string vazia se não tiver).\n"
+        "- conservacao e obs: opcionais (string vazia se não souber).\n"
+        f"=== IMÓVEL AVALIANDO ===\n{dados_txt}\n"
+    )
+    prompt_grounded = (
+        "Pesquise na web ANÚNCIOS REAIS e ATUAIS. " + prompt_base
+        + f"Priorize os portais: {_FONTES_SUGERIDAS}. "
+        "NÃO invente anúncios nem links. Se não encontrar dados confiáveis, retorne [].\n"
+    )
+
+    # Passo 1 — com grounding (anúncios reais)
+    resp = prov.buscar(prompt_grounded, sistema=_SISTEMA_AVALIADOR)
+    texto_bruto = resp.texto if resp.ok else ""
+    comps = _parse_comparaveis(texto_bruto) if resp.ok else []
+
+    # Passo 2 — fallback sem grounding (sugestões a partir do conhecimento do modelo)
+    if not comps:
+        prompt_fallback = (
+            prompt_base
+            + "OBS: não é necessário ter URL real — preencha 'link' como string vazia. "
+            "Use intervalos típicos do mercado da região se não tiver anúncios específicos.\n"
+        )
+        resp2 = prov.gerar(prompt_fallback, sistema=_SISTEMA_AVALIADOR, temperatura=0.5)
+        if resp2.ok:
+            comps2 = _parse_comparaveis(resp2.texto)
+            if comps2:
+                comps = comps2
+                texto_bruto = resp2.texto
+                resp = resp2  # mantém erro/ok do passo que conseguiu
+
     resp.comparaveis = comps
     if not comps:
-        resp.erro = ("A IA não retornou comparáveis utilizáveis. Tente detalhar mais o imóvel "
-                     "(bairro, cidade, área) ou faça a pesquisa manual.")
+        amostra = (texto_bruto or "").strip().replace("\n", " ")[:240]
+        diag = f" Resposta da IA: «{amostra}»" if amostra else ""
+        resp.erro = (
+            "A IA não retornou comparáveis estruturados (nem com pesquisa web nem por "
+            "estimativa do modelo). Detalhe mais o imóvel (bairro, área, padrão) ou use "
+            "o caminho manual: clique direto na tabela de comparáveis abaixo para digitar "
+            "uma linha, ou use o expander 📥 Importar (CSV/colar texto)." + diag
+        )
         resp.ok = False
+    else:
+        resp.ok = True
+        resp.erro = ""
     return resp
 
 
