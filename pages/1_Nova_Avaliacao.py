@@ -394,19 +394,86 @@ def _autopreencher_geo() -> None:
 # ============================================================================
 # Autosalvar rascunho
 # ============================================================================
+def _lista_para_df_comparaveis(lista: list[dict], estado_default: str = "Regular"):
+    """Converte lista de dicts (como persistido no banco) em DataFrame
+    no formato esperado pelo data_editor do passo 4."""
+    rows = []
+    for c in lista or []:
+        fat = c.get("fatores", {}) or {}
+        rows.append({
+            "Descrição": c.get("descricao", ""),
+            "Fonte": TI.normalizar_fonte(c.get("fonte", "")),
+            "Link": c.get("link", ""),
+            "Origem": c.get("origem", "manual"),
+            "Incluir": c.get("incluir", True),
+            "Preço total (R$)": float(c.get("preco_total") or 0.0),
+            "Área (m²)": float(c.get("area") or 0.0),
+            "Conservação": c.get("conservacao") or estado_default,
+            "F. Oferta": float(fat.get("f_oferta") or F.FATOR_OFERTA_PADRAO),
+            "F. Localiz.": float(fat.get("f_localizacao") or 1.0),
+            "F. Área": float(fat.get("f_area") or 1.0),
+            "F. Conserv.": float(fat.get("f_conservacao") or 1.0),
+            "F. Padrão": float(fat.get("f_padrao") or 1.0),
+            "F. Outros": float(fat.get("f_outros") or 1.0),
+        })
+    return pd.DataFrame(rows)
+
+
+def _df_comparaveis_para_lista(df) -> list[dict]:
+    """Converte o DataFrame do data_editor em lista de dicts serializável
+    (mesma forma usada pelo histórico ao reabrir)."""
+    if df is None or not hasattr(df, "to_dict") or len(df) == 0:
+        return []
+    out = []
+    for _, row in df.iterrows():
+        descr = str(row.get("Descrição") or "").strip()
+        preco = float(row.get("Preço total (R$)") or 0) or 0.0
+        area = float(row.get("Área (m²)") or 0) or 0.0
+        # Linha "totalmente vazia" — ignora
+        if not descr and preco == 0.0 and area == 0.0:
+            continue
+        out.append({
+            "descricao": descr,
+            "fonte": str(row.get("Fonte") or ""),
+            "link": str(row.get("Link") or ""),
+            "origem": str(row.get("Origem") or "manual"),
+            "incluir": bool(row.get("Incluir") or False),
+            "preco_total": preco,
+            "area": area,
+            "conservacao": str(row.get("Conservação") or ""),
+            "fatores": {
+                "f_oferta": float(row.get("F. Oferta") or F.FATOR_OFERTA_PADRAO),
+                "f_localizacao": float(row.get("F. Localiz.") or 1.0),
+                "f_area": float(row.get("F. Área") or 1.0),
+                "f_conservacao": float(row.get("F. Conserv.") or 1.0),
+                "f_padrao": float(row.get("F. Padrão") or 1.0),
+                "f_outros": float(row.get("F. Outros") or 1.0),
+            },
+        })
+    return out
+
+
 def _persistir_rascunho() -> None:
-    """Grava (ou atualiza) o rascunho no banco. Chamado ao trocar de passo."""
+    """Grava (ou atualiza) o rascunho no banco. Chamado em qualquer mudança
+    de campo (on_change) e em qualquer troca de passo."""
     global edic_id
     # Sem nada preenchido ainda? Não cria rascunho vazio.
     imovel = _construir_imovel()
     if not imovel and not edic_id:
         return
+
+    # Comparáveis: usa o df do passo 4 quando existe (estado atual da tabela);
+    # senão, cai no resultado calculado (passo 5) ou em vazio.
+    comparaveis_atual = _df_comparaveis_para_lista(st.session_state.get("_df_comparaveis"))
+    if not comparaveis_atual:
+        comparaveis_atual = (st.session_state.get("ultimo_resultado") or {}).get("comparaveis") or []
+
     dados_rasc = {
         "tipo_imovel": tipo_key,
         "tipo_rotulo": tipo_def["rotulo"],
         "imovel": imovel,
         "imovel_detalhado": _imovel_detalhado(imovel),
-        "comparaveis": (st.session_state.get("ultimo_resultado") or {}).get("comparaveis") or [],
+        "comparaveis": comparaveis_atual,
         "resultado": (st.session_state.get("ultimo_resultado") or {}).get("resultado") or {},
         "textos_ia": (st.session_state.get("ultimo_resultado") or {}).get("textos_ia") or {},
         "fotos_imovel": (st.session_state.get("ultimo_resultado") or {}).get("fotos_imovel") or [],
@@ -869,6 +936,11 @@ def render_passo_4():
     st.session_state["_estado_avaliando"] = estado_avaliando
     st.session_state["_area_avaliando"] = area_avaliando
 
+    # Persiste o rascunho com o df atualizado dos comparáveis. O Streamlit
+    # Cloud pode descartar o session_state — gravar a cada rerun do passo 4
+    # garante que o banco reflete sempre o estado atual da tabela.
+    _persistir_rascunho()
+
 
 # ============================================================================
 # PASSO 5 · Cálculo & entrega
@@ -891,10 +963,17 @@ def render_passo_5():
         "comparaveis": [],  # validação do passo 4 será feita logo abaixo
     }
     pendencias = WZ.validar_completo(dados_check)
-    # Também valida comparáveis a partir do df do passo 4
+    # Também valida comparáveis a partir do df do passo 4. Se o session_state
+    # foi descartado, reconstrói o df a partir do rascunho persistido no banco.
     df_edit = st.session_state.get("_df_comparaveis")
+    if (df_edit is None or (hasattr(df_edit, "empty") and df_edit.empty)) \
+            and edic and edic.get("comparaveis"):
+        df_edit = _lista_para_df_comparaveis(
+            edic["comparaveis"], imovel.get("conservacao") or "Regular"
+        )
+        st.session_state["_df_comparaveis"] = df_edit
     comp_validos = 0
-    if df_edit is not None:
+    if df_edit is not None and hasattr(df_edit, "iterrows"):
         for _, row in df_edit.iterrows():
             preco = _num(row.get("Preço total (R$)"), 0.0)
             area = _num(row.get("Área (m²)"), 0.0)
