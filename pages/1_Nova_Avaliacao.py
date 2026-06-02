@@ -250,9 +250,12 @@ def _prefixo_widget(key: str) -> str:
     return f"f_{tipo_key}"
 
 
-def _aceitar_sugestoes_ocr(keys: list[str]) -> None:
-    """Aplica via pending os campos escolhidos e os remove de ocr_sugestoes."""
+def _aceitar_sugestoes_ocr(keys: list[str]) -> list[str]:
+    """Aplica via pending os campos escolhidos e os remove de ocr_sugestoes.
+    Devolve lista de rótulos amigáveis dos campos efetivamente aplicados,
+    para que o caller mostre um feedback claro ao usuário."""
     sugest = dict(st.session_state.get("ocr_sugestoes") or {})
+    aplicados = []
     for k in keys:
         v = sugest.get(k)
         if v in (None, ""):
@@ -260,11 +263,13 @@ def _aceitar_sugestoes_ocr(keys: list[str]) -> None:
             continue
         widget_key = f"{_prefixo_widget(k)}_{k}"
         st.session_state[f"_pend_{widget_key}"] = v
+        aplicados.append(_rotulo_campo(k))
         sugest.pop(k, None)
     if sugest:
         st.session_state["ocr_sugestoes"] = sugest
     else:
         st.session_state.pop("ocr_sugestoes", None)
+    return aplicados
 
 
 def _ignorar_sugestao_ocr(key: str) -> None:
@@ -290,8 +295,9 @@ def _render_sugestoes_ocr() -> None:
     with cg1:
         if st.button("✅ Aceitar todas", use_container_width=True,
                      type="primary", key="ocr_aceitar_todas"):
-            _aceitar_sugestoes_ocr(list(sugest.keys()))
-            st.toast("Sugestões aplicadas.", icon="✅")
+            aplicados = _aceitar_sugestoes_ocr(list(sugest.keys()))
+            if aplicados:
+                st.session_state["_ocr_ultimos_aplicados"] = aplicados
             st.rerun()
     with cg2:
         if st.button("🗑️ Descartar todas", use_container_width=True,
@@ -318,7 +324,9 @@ def _render_sugestoes_ocr() -> None:
             with cb1:
                 if st.button("✓ Aceitar", key=f"ocr_aceitar_{k}",
                              use_container_width=True, type="primary"):
-                    _aceitar_sugestoes_ocr([k])
+                    aplicados = _aceitar_sugestoes_ocr([k])
+                    if aplicados:
+                        st.session_state["_ocr_ultimos_aplicados"] = aplicados
                     st.rerun()
             with cb2:
                 if st.button("✕ Ignorar", key=f"ocr_ignorar_{k}",
@@ -521,13 +529,16 @@ WZ.render_stepper(dados_para_validar)
 
 passo = WZ.passo_atual()
 
-# Detecta entrada no passo 4 (vindo de outro passo) para descartar o estado
-# interno do st.data_editor (deltas acumulados) e forçá-lo a re-renderizar
-# usando o df_base atual (que vem de `_df_comparaveis`). Sem isso, as edições
-# anteriores são "duplicadas" como deltas em cima do df_base atualizado.
+# Detecta entrada no passo 4 (vindo de outro passo): descarta o estado interno
+# acumulado do st.data_editor (deltas antigos) — assim o widget re-renderiza
+# a partir do df_base atual (que vem de `_df_comparaveis`) sem duplicar linhas.
+# Mantemos a key do widget FIXA para que, ENQUANTO o usuário fica no passo 4,
+# os deltas das edições recentes sobrevivam aos reruns (sem isso a edição
+# precisava ser feita 2x — a primeira "apagava sozinha").
+_EDITOR_KEY = "editor_comparaveis"
 _ultimo_passo = st.session_state.get("_ultimo_passo_render")
 if passo == 4 and _ultimo_passo != 4:
-    st.session_state["_p4_session_id"] = st.session_state.get("_p4_session_id", 0) + 1
+    st.session_state.pop(_EDITOR_KEY, None)
 st.session_state["_ultimo_passo_render"] = passo
 
 
@@ -595,6 +606,17 @@ def render_passo_2():
         "Suba **matrícula** e **IPTU** para a IA autopreencher os passos 1 e 3, "
         "e adicione as **fotos** do imóvel que entrarão no PTAM e na apresentação."
     )
+
+    # Confirmação visível dos últimos campos aplicados pelo OCR (a "aplicação"
+    # do valor escreve em pending, que vai virar f_<chave> no rerun. Sem esse
+    # aviso, o usuário ficava sem saber se o aceite teve efeito).
+    _ult = st.session_state.pop("_ocr_ultimos_aplicados", None)
+    if _ult:
+        st.success(
+            f"✅ **{len(_ult)} campo(s) preenchido(s):** {', '.join(_ult)}. "
+            "Os valores foram aplicados nos passos **1** (Identificação) e/ou "
+            "**3** (Características). Vá nos passos correspondentes para conferir."
+        )
 
     _ia_status = IA.status()
     st.markdown("##### 📄 Matrícula / IPTU (OCR por IA)")
@@ -746,6 +768,7 @@ def render_passo_4():
             novas = [_coleta_para_linha(c, estado_avaliando) for c in comparaveis]
             st.session_state.setdefault("comparaveis_importados", []).extend(novas)
             st.session_state["import_rev"] = st.session_state.get("import_rev", 0) + 1
+            st.session_state.pop(_EDITOR_KEY, None)  # descarta deltas antigos
             st.success(f"{len(novas)} comparável(is) importado(s). "
                        "Revise e marque **Incluir** na tabela abaixo.")
             st.rerun()
@@ -774,6 +797,7 @@ def render_passo_4():
                              for c in resp.comparaveis]
                     st.session_state.setdefault("comparaveis_importados", []).extend(novas)
                     st.session_state["import_rev"] = st.session_state.get("import_rev", 0) + 1
+                    st.session_state.pop(_EDITOR_KEY, None)  # descarta deltas antigos
                     st.success(f"{len(novas)} comparável(is) encontrado(s) pela IA. "
                                "Revise pelos links e marque **Incluir**.")
                     st.rerun()
@@ -801,6 +825,7 @@ def render_passo_4():
             if st.button(f"🗑️ Limpar {n_imp} importado(s)", key="btn_limpar_imp"):
                 st.session_state.pop("comparaveis_importados", None)
                 st.session_state["import_rev"] = st.session_state.get("import_rev", 0) + 1
+                st.session_state.pop(_EDITOR_KEY, None)  # descarta deltas antigos
                 st.rerun()
 
     # Tabela de comparáveis — origem do df_base, em ordem de prioridade:
@@ -861,15 +886,13 @@ def render_passo_4():
            for c in ["F. Oferta", "F. Localiz.", "F. Área", "F. Conserv.", "F. Padrão", "F. Outros"]},
     }
 
-    # A key inclui _p4_session_id (incrementado ao entrar no passo 4) e
-    # import_rev (incrementado em cada nova importação). Ambos forçam o
-    # data_editor a descartar deltas internos antigos e re-renderizar do
-    # df_base novo — evita duplicação de linhas em cima das edições passadas.
-    _p4sid = st.session_state.get("_p4_session_id", 0)
-    _imprev = st.session_state.get("import_rev", 0)
+    # Key fixa — deltas das edições do usuário sobrevivem entre reruns no
+    # mesmo passo 4. Para evitar duplicação ao reentrar no passo 4 ou ao
+    # importar comparáveis novos, o widget state é apagado manualmente em
+    # session_state[_EDITOR_KEY] nos dois pontos correspondentes.
     df_edit = st.data_editor(
         df_base, num_rows="dynamic", use_container_width=True,
-        key=f"editor_comparaveis_s{_p4sid}_r{_imprev}",
+        key=_EDITOR_KEY,
         column_order=[c for c in df_base.columns if c not in cols_ocultas],
         column_config=col_config,
     )
