@@ -401,6 +401,15 @@ WZ.render_stepper(dados_para_validar)
 
 passo = WZ.passo_atual()
 
+# Detecta entrada no passo 4 (vindo de outro passo) para descartar o estado
+# interno do st.data_editor (deltas acumulados) e forçá-lo a re-renderizar
+# usando o df_base atual (que vem de `_df_comparaveis`). Sem isso, as edições
+# anteriores são "duplicadas" como deltas em cima do df_base atualizado.
+_ultimo_passo = st.session_state.get("_ultimo_passo_render")
+if passo == 4 and _ultimo_passo != 4:
+    st.session_state["_p4_session_id"] = st.session_state.get("_p4_session_id", 0) + 1
+st.session_state["_ultimo_passo_render"] = passo
+
 
 # ============================================================================
 # PASSO 1 · Identificação (solicitante + finalidade + localização)
@@ -732,9 +741,15 @@ def render_passo_4():
            for c in ["F. Oferta", "F. Localiz.", "F. Área", "F. Conserv.", "F. Padrão", "F. Outros"]},
     }
 
+    # A key inclui _p4_session_id (incrementado ao entrar no passo 4) e
+    # import_rev (incrementado em cada nova importação). Ambos forçam o
+    # data_editor a descartar deltas internos antigos e re-renderizar do
+    # df_base novo — evita duplicação de linhas em cima das edições passadas.
+    _p4sid = st.session_state.get("_p4_session_id", 0)
+    _imprev = st.session_state.get("import_rev", 0)
     df_edit = st.data_editor(
         df_base, num_rows="dynamic", use_container_width=True,
-        key=f"editor_comparaveis_{st.session_state.get('import_rev', 0)}",
+        key=f"editor_comparaveis_s{_p4sid}_r{_imprev}",
         column_order=[c for c in df_base.columns if c not in cols_ocultas],
         column_config=col_config,
     )
