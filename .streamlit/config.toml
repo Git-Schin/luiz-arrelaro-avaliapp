@@ -1,0 +1,10 @@
+# Tema do Avaliapp — marca Luiz Arrelaro (ciano + preto)
+[theme]
+primaryColor = "#06BFF2"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F7F9"
+textColor = "#0E0E10"
+font = "sans serif"
+
+[server]
+headless = true
