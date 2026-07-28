@@ -5,6 +5,9 @@ from core import anexos as AN, db
 from core.calculo import formatar_brl
 from core import pdf as PDFGEN
 
+_USER_ID = st.session_state.get("user_id")
+_AVALIADOR = st.session_state.get("perfil", {})
+
 st.title("📚 Histórico de avaliações")
 
 c1, c2 = st.columns([3, 1])
@@ -18,7 +21,7 @@ if filtro_status.endswith("Rascunhos"):
 elif filtro_status.endswith("Concluídos"):
     status_db = db.STATUS_CONCLUIDO
 
-avals = db.listar(busca, status=status_db)
+avals = db.listar(user_id=_USER_ID, busca=busca, status=status_db)
 
 if not avals:
     st.info("Nenhuma avaliação encontrada. Crie uma na página **Nova Avaliação**.")
@@ -38,7 +41,7 @@ for a in avals:
             f"**Criado:** {a['criado_em']}  ·  **Atualizado:** {a['atualizado_em']}"
             + (f"  ·  **Passo:** {a.get('passo_atual') or 1}/5" if is_rasc else "")
         )
-        registro = db.obter(a["id"])
+        registro = db.obter(a["id"], user_id=_USER_ID)
         dados = registro["dados"]
         fotos = AN.carregar_fotos(dados.get("fotos_imovel"))
 
@@ -46,7 +49,6 @@ for a in avals:
         with c1:
             label = "▶️ Retomar rascunho" if is_rasc else "✏️ Abrir / atualizar"
             if st.button(label, key=f"edit_{a['id']}"):
-                # Anota o passo onde o rascunho parou para o wizard reabrir lá.
                 dados["_passo_atual"] = a.get("passo_atual") or 1
                 st.session_state["edicao"] = dados
                 st.session_state["edicao_id"] = a["id"]
@@ -58,19 +60,21 @@ for a in avals:
                 st.session_state.pop("_comp_base_carregado", None)
                 st.switch_page("pages/1_Nova_Avaliacao.py")
         with c2:
-            st.download_button("📄 PTAM", data=PDFGEN.gerar_ptam(dados, fotos=fotos),
+            st.download_button("📄 PTAM",
+                               data=PDFGEN.gerar_ptam(dados, fotos=fotos, avaliador=_AVALIADOR),
                                file_name=f"PTAM_{a['id']}.pdf", mime="application/pdf",
                                key=f"ptam_{a['id']}", disabled=is_rasc,
                                help="Indisponível para rascunhos" if is_rasc else None)
         with c3:
             st.download_button("🎯 Apresentação",
-                               data=PDFGEN.gerar_apresentacao(dados, fotos=fotos),
+                               data=PDFGEN.gerar_apresentacao(dados, fotos=fotos,
+                                                              avaliador=_AVALIADOR),
                                file_name=f"Apresentacao_{a['id']}.pdf",
                                mime="application/pdf",
                                key=f"apr_{a['id']}", disabled=is_rasc,
                                help="Indisponível para rascunhos" if is_rasc else None)
         with c4:
             if st.button("🗑️ Excluir", key=f"del_{a['id']}"):
-                db.excluir(a["id"])
+                db.excluir(a["id"], user_id=_USER_ID)
                 AN.excluir(a["id"])
                 st.rerun()

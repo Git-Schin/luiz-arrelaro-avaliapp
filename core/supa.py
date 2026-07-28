@@ -1,9 +1,11 @@
 """Cliente Supabase (Postgres + Storage) compartilhado.
 
-Lê `SUPABASE_URL` e `SUPABASE_SERVICE_KEY` de `st.secrets` (preferencial em
-produção/Streamlit Cloud) ou variáveis de ambiente (útil em testes e CLI).
-A chave **service_role** é necessária — a anon key não consegue gravar nas
-tabelas/buckets sem RLS configurada.
+Lê `SUPABASE_URL` e `SUPABASE_SERVICE_KEY` de `st.secrets` (produção/Streamlit
+Cloud) ou variáveis de ambiente (testes/CLI).
+
+A chave **service_role** é usada para operações de dados (bypassa RLS).
+Para autenticação de usuários (sign_in, sign_up), usa-se `auth_client()` com
+a chave anon (`SUPABASE_ANON_KEY`) ou service_role como fallback.
 """
 from __future__ import annotations
 
@@ -12,23 +14,19 @@ from typing import TYPE_CHECKING
 
 import streamlit as st
 
-if TYPE_CHECKING:  # apenas para type-hints — evita import na inicialização
+if TYPE_CHECKING:
     from supabase import Client
 
 BUCKET_ANEXOS = "avaliapp-anexos"
 TABELA_AVALIACOES = "avaliacoes"
+TABELA_PERFIS = "perfis"
 
 
 class SupaNaoConfigurado(RuntimeError):
-    """Levantada quando as credenciais não estão no ambiente.
-
-    A página principal captura e mostra mensagem amigável.
-    """
+    """Levantada quando as credenciais não estão no ambiente."""
 
 
 def _get_secret(chave: str) -> str | None:
-    # st.secrets só funciona dentro de um run do Streamlit; em scripts auxiliares
-    # caímos no fallback de env var sem soltar exceção.
     try:
         val = st.secrets.get(chave)  # type: ignore[attr-defined]
         if val:
@@ -40,7 +38,7 @@ def _get_secret(chave: str) -> str | None:
 
 @st.cache_resource(show_spinner=False)
 def client() -> "Client":
-    """Singleton do cliente Supabase. Cacheado pela vida do processo."""
+    """Singleton do cliente Supabase com service_role. Cacheado pelo processo."""
     url = _get_secret("SUPABASE_URL")
     key = _get_secret("SUPABASE_SERVICE_KEY")
     if not url or not key:
@@ -53,6 +51,21 @@ def client() -> "Client":
     return create_client(url, key)
 
 
+def auth_client() -> "Client":
+    """Cliente NÃO cacheado para operações de auth (sign_in, sign_up).
+
+    Cria uma nova instância a cada chamada para evitar compartilhar estado de
+    sessão entre usuários distintos (o cliente cacheado é global ao processo).
+    Usa SUPABASE_ANON_KEY quando disponível; cai no service_role como fallback.
+    """
+    url = _get_secret("SUPABASE_URL")
+    key = _get_secret("SUPABASE_ANON_KEY") or _get_secret("SUPABASE_SERVICE_KEY")
+    if not url or not key:
+        raise SupaNaoConfigurado("Credenciais do Supabase ausentes.")
+    from supabase import create_client
+    return create_client(url, key)
+
+
 def configurado() -> bool:
-    """Retorna True se as credenciais estão no ambiente."""
+    """Retorna True se as credenciais mínimas estão no ambiente."""
     return bool(_get_secret("SUPABASE_URL")) and bool(_get_secret("SUPABASE_SERVICE_KEY"))

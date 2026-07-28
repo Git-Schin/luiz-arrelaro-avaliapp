@@ -1,9 +1,9 @@
-# Tema do Avaliapp — marca Luiz Arrelaro (ciano + preto)
+# Tema do AvaliApp — navy #1B3A6B + emerald #10B981
 [theme]
-primaryColor = "#06BFF2"
+primaryColor = "#10B981"
 backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F4F7F9"
-textColor = "#0E0E10"
+secondaryBackgroundColor = "#F0F4F8"
+textColor = "#1E293B"
 font = "sans serif"
 
 [server]

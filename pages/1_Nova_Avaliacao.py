@@ -54,7 +54,7 @@ if _qp_r and not st.session_state.get("edicao"):
         _row = db.obter(int(_qp_r))
     except Exception:
         _row = None
-    if _row and _row.get("status") == db.STATUS_RASCUNHO:
+    if _row and _row.get("user_id") == st.session_state.get("user_id") and _row.get("status") == db.STATUS_RASCUNHO:
         _dados = _row.get("dados", {}) or {}
         _dados["_passo_atual"] = _row.get("passo_atual") or 1
         st.session_state["edicao"] = _dados
@@ -487,8 +487,8 @@ def _persistir_rascunho() -> None:
         "fotos_imovel": (st.session_state.get("ultimo_resultado") or {}).get("fotos_imovel") or [],
     }
     try:
-        novo_id = db.salvar_rascunho(dados_rasc, avaliacao_id=edic_id,
-                                      passo_atual=WZ.passo_atual())
+        novo_id = db.salvar_rascunho(dados_rasc, user_id=st.session_state.get("user_id"),
+                                      avaliacao_id=edic_id, passo_atual=WZ.passo_atual())
     except Exception as e:
         # Não bloqueia a digitação se o banco falhar momentaneamente.
         st.session_state["_rascunho_erro"] = str(e)[:200]
@@ -1212,20 +1212,23 @@ def render_passo_5():
     a1, a2, a3 = st.columns(3)
     with a1:
         if st.button("💾 Salvar no histórico", type="primary"):
-            novo_id = db.salvar(dados, avaliacao_id=st.session_state.get("edicao_id"),
+            _uid = st.session_state.get("user_id")
+            novo_id = db.salvar(dados, user_id=_uid,
+                                avaliacao_id=st.session_state.get("edicao_id"),
                                 status=db.STATUS_CONCLUIDO, passo_atual=5)
             dados["fotos_imovel"] = AN.salvar_fotos(novo_id, fotos)
-            db.salvar(dados, avaliacao_id=novo_id,
+            db.salvar(dados, user_id=_uid, avaliacao_id=novo_id,
                       status=db.STATUS_CONCLUIDO, passo_atual=5)
             st.session_state["edicao_id"] = novo_id
             st.success(f"Avaliação salva (#{novo_id}).")
+    _av = st.session_state.get("perfil", {})
     with a2:
         st.download_button("📄 PDF — PTAM completo",
-                           data=PDFGEN.gerar_ptam(dados, fotos=fotos),
+                           data=PDFGEN.gerar_ptam(dados, fotos=fotos, avaliador=_av),
                            file_name="PTAM.pdf", mime="application/pdf")
     with a3:
         st.download_button("🎯 PDF — Apresentação",
-                           data=PDFGEN.gerar_apresentacao(dados, fotos=fotos),
+                           data=PDFGEN.gerar_apresentacao(dados, fotos=fotos, avaliador=_av),
                            file_name="Apresentacao.pdf", mime="application/pdf")
 
 

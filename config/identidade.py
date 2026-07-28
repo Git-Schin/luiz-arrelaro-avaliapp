@@ -1,48 +1,35 @@
 """
-Identidade visual do Avaliapp — marca real do Luiz Arrelaro.
+Identidade visual do AvaliApp — produto SaaS de avaliação de imóveis.
 
-Paleta extraída do logo oficial ("Logo - Luiz Arrelaro (sem fundo).png"):
-preto + ciano (#06BFF2) sobre branco. Centralizado aqui para facilitar ajustes.
-
-⚠️ Campos de CONTATO/CRECI ainda marcados como [PREENCHER] — completar com os
-dados reais do Luiz (número do CRECI, telefone, e-mail, cidade/UF).
+Paleta: Navy #1B3A6B (confiança, autoridade) + Emerald #10B981 (precisão, crescimento).
+Dados do avaliador (nome, CRECI, contato) ficam no perfil do usuário (tabela `perfis`),
+não aqui — cada assinante tem suas próprias credenciais.
 """
 from pathlib import Path
 
 # --- Logo ---
-# Logo oficial (preto + ciano, fundo transparente). Usado no app e nos PDFs.
-LOGO_PATH = str(Path(__file__).resolve().parent.parent / "assets" / "logo_luiz.png")
+LOGO_PATH = str(Path(__file__).resolve().parent.parent / "assets" / "logo_avaliapp.svg")
 
 # --- Nome e textos ---
-NOME_APP = "Avaliapp"
+NOME_APP = "AvaliApp"
 TAGLINE = "Avaliação de imóveis com precisão e tecnologia"
-EMPRESA = "Luiz Arrelaro — Consultor Imobiliário"
+EMPRESA = "AvaliApp"
 
-AVALIADOR = {
-    "nome": "Luiz Gonzaga Arrelaro",
-    "titulo": "Corretor de Imóveis · Consultor Imobiliário",
-    "creci": "CRECI-SP 221.546-F",
-    "cnai": "",                      # CNAI (Cadastro Nacional de Avaliadores) — preencher se houver
-    "telefone": "+55 (11) 96909-2031",   # também WhatsApp
-    "whatsapp": "+55 (11) 96909-2031",
-    "email": "larrelaro@gmail.com",
-    "cidade_uf": "Itatiba/SP",
-}
+# --- Paleta de cores ---
+COR_PRIMARIA = "#1B3A6B"        # navy — confiança/autoridade
+COR_PRIMARIA_CLARA = "#2D4E8A"
+COR_ACENTO = "#10B981"          # emerald — precisão/crescimento
+COR_SUCESSO = "#059669"         # emerald escuro — caixa de valor
+COR_ALERTA = "#DC2626"          # vermelho — ressalvas
+COR_FUNDO = "#F0F4F8"           # cinza azulado claro
+COR_TEXTO = "#1E293B"           # slate-800
+COR_TEXTO_SUAVE = "#64748B"     # slate-500
 
-# --- Paleta de cores (marca Luiz Arrelaro) ---
-COR_PRIMARIA = "#0E0E10"        # preto da marca — confiança/sobriedade
-COR_PRIMARIA_CLARA = "#26292E"
-COR_ACENTO = "#06BFF2"          # ciano da marca — destaque
-COR_SUCESSO = "#0A7EA4"         # ciano escuro — caixa de valor (bom contraste c/ branco)
-COR_ALERTA = "#B23A3A"          # vermelho — ressalvas
-COR_FUNDO = "#F4F7F9"           # cinza muito claro
-COR_TEXTO = "#0E0E10"
-COR_TEXTO_SUAVE = "#5A6675"
 
-# Versão em RGB (0-255) para o gerador de PDF (fpdf2)
 def _hex_to_rgb(h: str):
     h = h.lstrip("#")
     return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
 
 RGB_PRIMARIA = _hex_to_rgb(COR_PRIMARIA)
 RGB_ACENTO = _hex_to_rgb(COR_ACENTO)
@@ -50,7 +37,7 @@ RGB_SUCESSO = _hex_to_rgb(COR_SUCESSO)
 RGB_TEXTO = _hex_to_rgb(COR_TEXTO)
 RGB_TEXTO_SUAVE = _hex_to_rgb(COR_TEXTO_SUAVE)
 
-# --- Rodapé legal padrão (aparece nos PDFs) ---
+# --- Rodapé legal padrão (PDFs) ---
 DISCLAIMER_LEGAL = (
     "Este documento é um Parecer Técnico de Avaliação Mercadológica (PTAM), "
     "elaborado por Corretor de Imóveis inscrito no CRECI, com fundamento na "
