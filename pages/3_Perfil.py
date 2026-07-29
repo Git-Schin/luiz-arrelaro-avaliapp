@@ -9,6 +9,14 @@ st.caption("Seus dados aparecem nos PDFs de PTAM e na assinatura das avaliaçõe
 user_id = st.session_state.get("user_id")
 user_email = st.session_state.get("user_email", "")
 
+if not user_id:
+    st.error("Sessão expirada. Faça login novamente.")
+    if st.button("Ir para o login"):
+        from core import auth
+        auth.logout()
+        st.rerun()
+    st.stop()
+
 # Carrega do session_state (já carregado pelo roteador) ou do banco
 perfil = st.session_state.get("perfil") or {}
 

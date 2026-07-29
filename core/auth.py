@@ -11,11 +11,16 @@ def login(email: str, password: str) -> tuple[bool, str]:
         ac = auth_client()
         resp = ac.auth.sign_in_with_password({"email": email.strip(), "password": password})
         if resp.user:
-            st.session_state["user_id"] = str(resp.user.id)
+            uid = str(resp.user.id)
+            st.session_state["user_id"] = uid
             st.session_state["user_email"] = resp.user.email
-            # Força recarga do perfil na próxima visita ao roteador
             st.session_state.pop("perfil_carregado", None)
             st.session_state.pop("perfil", None)
+            # Persiste uid na URL para recuperar se o session_state cair no Cloud
+            try:
+                st.query_params["uid"] = uid
+            except Exception:
+                pass
             return True, ""
         return False, "Credenciais inválidas."
     except Exception as e:
@@ -42,14 +47,44 @@ def registrar(email: str, password: str) -> tuple[bool, str]:
 
 
 def logout() -> None:
-    """Encerra a sessão limpando o session_state."""
+    """Encerra a sessão limpando session_state e query_params."""
     for k in list(st.session_state.keys()):
         del st.session_state[k]
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
+
+
+def _tentar_recuperar_sessao() -> bool:
+    """Tenta reidratar user_id do query_param ?uid= quando session_state cai no Cloud."""
+    uid = st.query_params.get("uid")
+    if not uid or len(uid) < 10:
+        return False
+    # Verifica se o uid é real buscando o perfil (se não existir, limpa o param)
+    try:
+        from core import db
+        perfil = db.obter_perfil(uid)
+        st.session_state["user_id"] = uid
+        st.session_state["perfil"] = perfil or {}
+        st.session_state["perfil_carregado"] = True
+        # email fica desconhecido após recuperação, mas uid é suficiente para operar
+        return True
+    except Exception:
+        try:
+            del st.query_params["uid"]
+        except Exception:
+            pass
+        return False
 
 
 def require_login() -> None:
     """Bloqueia o app até autenticar. Chamar no roteador (app.py)."""
     if st.session_state.get("user_id"):
+        return
+
+    # Tenta recuperar sessão a partir da URL (session_state caiu no Cloud)
+    if _tentar_recuperar_sessao():
         return
 
     # Centraliza o formulário de login
