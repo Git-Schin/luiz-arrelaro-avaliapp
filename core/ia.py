@@ -47,6 +47,7 @@ class RespostaIA:
     erro: str = ""
     campos: dict = field(default_factory=dict)        # usado pelo OCR (campos extraídos)
     comparaveis: list = field(default_factory=list)   # usado pela busca de comparáveis
+    fontes_grounding: list = field(default_factory=list)  # URLs reais das fontes consultadas com grounding
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +167,12 @@ class GeminiProvedor(ProvedorIA):
             texto = "".join(p.get("text", "") for p in partes_resp).strip()
             if not texto:
                 return RespostaIA(False, erro="A IA retornou resposta vazia.")
-            return RespostaIA(True, texto=texto)
+            fontes_grounding: list[str] = []
+            for chunk in (cand.get("groundingMetadata") or {}).get("groundingChunks") or []:
+                uri = (chunk.get("web") or {}).get("uri", "")
+                if uri:
+                    fontes_grounding.append(uri)
+            return RespostaIA(True, texto=texto, fontes_grounding=fontes_grounding)
         except (KeyError, IndexError, ValueError) as e:
             return RespostaIA(False, erro=f"Resposta da IA em formato inesperado: {e}")
 
@@ -176,7 +182,7 @@ class GeminiProvedor(ProvedorIA):
     def buscar(self, prompt: str, sistema: str = "", temperatura: float = 0.3) -> RespostaIA:
         """Gera com pesquisa Google (grounding) ativada — para comparáveis na web."""
         return self._chamar([{"text": prompt}], sistema=sistema, temperatura=temperatura,
-                            ferramentas=[{"google_search": {}}], sem_pensamento=True)
+                            ferramentas=[{"google_search": {}}])
 
     def ocr(self, conteudo: bytes, mime: str, instrucao: str) -> RespostaIA:
         b64 = base64.b64encode(conteudo).decode("ascii")
@@ -364,6 +370,15 @@ def _extrair_lista_json(texto: str) -> list:
 
 _FONTES_SUGERIDAS = "OLX, ZAP Imóveis, Viva Real, Imovelweb, QuintoAndar, Chaves na Mão"
 
+_PORTAL_DOMINIO = {
+    "olx": "olx.com.br",
+    "zap": "zapimoveis.com.br",
+    "viva": "vivareal.com.br",
+    "imovelweb": "imovelweb.com.br",
+    "quinto": "quintoandar.com",
+    "chaves": "chavesnamao.com.br",
+}
+
 
 def _parse_comparaveis(texto: str) -> list[dict]:
     """Extrai a lista de comparáveis a partir do texto bruto retornado pela IA."""
@@ -386,6 +401,140 @@ def _parse_comparaveis(texto: str) -> list[dict]:
     return comps
 
 
+def _backfill_links(comps: list[dict], fontes_grounding: list[str]) -> None:
+    """Preenche links vazios nos comparáveis usando as URLs do groundingMetadata.
+
+    Tenta primeiro casar pelo nome do portal (fonte → domínio conhecido).
+    O que restar sem link recebe URLs disponíveis na ordem em que aparecem.
+    """
+    usadas: set[str] = {c["link"] for c in comps if c.get("link")}
+    for comp in comps:
+        if comp.get("link"):
+            continue
+        fonte = (comp.get("fonte") or "").lower()
+        for chave, dominio in _PORTAL_DOMINIO.items():
+            if chave in fonte:
+                for url in fontes_grounding:
+                    if dominio in url and url not in usadas:
+                        comp["link"] = url
+                        usadas.add(url)
+                        break
+                break
+    disponiveis = [u for u in fontes_grounding if u not in usadas]
+    idx = 0
+    for comp in comps:
+        if not comp.get("link") and idx < len(disponiveis):
+            comp["link"] = disponiveis[idx]
+            usadas.add(disponiveis[idx])
+            idx += 1
+
+
+def _descrever_imovel_para_busca(imovel: dict, tipo_rotulo: str) -> tuple[str, float]:
+    """Monta descrição priorizada do imóvel para o prompt de busca de comparáveis.
+
+    Retorna (texto_descricao, area_m2).
+    Organiza em três blocos com pesos explícitos: localização (obrigatório),
+    características principais (forte) e complementares (informativo).
+    """
+    # Área base — usa o primeiro campo preenchido na ordem de relevância
+    area = float(
+        imovel.get("area_privativa") or imovel.get("area_util") or
+        imovel.get("area_construida") or imovel.get("area_total_ha") or
+        imovel.get("area_terreno") or 0
+    )
+    area_label_map = {
+        "area_privativa": "Área privativa",
+        "area_util": "Área útil/privativa",
+        "area_construida": "Área construída",
+        "area_total_ha": "Área total",
+        "area_terreno": "Área do terreno",
+    }
+    area_label = next(
+        (lbl for key, lbl in area_label_map.items() if imovel.get(key)),
+        "Área"
+    )
+
+    # --- Bloco 1: Localização (filtro rígido) ---
+    loc: list[str] = [f"Tipo: {tipo_rotulo}"]
+    nome_cond = (imovel.get("nome_condominio") or "").strip()
+    if nome_cond:
+        loc.append(f"Condomínio/Edifício: {nome_cond}")
+    bairro = (imovel.get("bairro") or "").strip()
+    if bairro:
+        loc.append(f"Bairro: {bairro}")
+    cidade_uf = (imovel.get("cidade_uf") or "").strip()
+    if cidade_uf:
+        loc.append(f"Cidade: {cidade_uf}")
+    endereco = (imovel.get("endereco") or "").strip()
+    numero = (imovel.get("numero") or "").strip()
+    endereco_completo = f"{endereco} {numero}".strip() if numero else endereco
+    if endereco_completo:
+        loc.append(f"Endereço: {endereco_completo}")
+
+    # --- Bloco 2: Características principais (similaridade forte) ---
+    princ: list[str] = []
+    if area > 0:
+        area_min = round(area * 0.75)
+        area_max = round(area * 1.25)
+        princ.append(f"{area_label}: {area:.0f} m²  (buscar entre {area_min} e {area_max} m²)")
+    quartos = imovel.get("quartos")
+    suites = imovel.get("suites")
+    if quartos:
+        s = f"Quartos: {int(quartos)}"
+        if suites:
+            s += f" (sendo {int(suites)} suíte{'s' if int(suites) > 1 else ''})"
+        princ.append(s)
+    if imovel.get("vagas"):
+        princ.append(f"Vagas de garagem: {int(imovel['vagas'])}")
+    if imovel.get("banheiros"):
+        princ.append(f"Banheiros: {int(imovel['banheiros'])}")
+    if imovel.get("padrao"):
+        princ.append(f"Padrão construtivo: {imovel['padrao']}")
+    if imovel.get("area_terreno") and imovel.get("area_construida"):
+        princ.append(f"Área do terreno: {imovel['area_terreno']:.0f} m²")
+
+    # --- Bloco 3: Complementares ---
+    _skip = {
+        "cidade_uf", "bairro", "nome_condominio", "endereco", "numero", "cep", "geo",
+        "area_privativa", "area_util", "area_construida", "area_terreno", "area_total_ha",
+        "quartos", "suites", "banheiros", "vagas", "padrao",
+        "finalidade", "solicitante", "matricula", "inscricao_iptu",
+    }
+    _label = {
+        "andar": "Andar", "conservacao": "Estado de conservação", "idade": "Idade aparente",
+        "pavimentos": "Pavimentos", "area_total": "Área total (com áreas comuns)",
+        "varanda": "Varanda/sacada", "posicao_solar": "Posição solar",
+        "elevadores": "Elevadores no prédio", "lazer": "Lazer no condomínio",
+        "topografia": "Topografia", "situacao": "Situação na quadra",
+        "zoneamento": "Zoneamento", "subtipo": "Subtipo comercial",
+        "pe_direito": "Pé-direito", "testada": "Testada", "benfeitorias": "Benfeitorias",
+        "infraestrutura": "Infraestrutura do entorno", "acesso": "Acesso",
+        "culturas": "Culturas/pastagens", "recursos_hidricos": "Recursos hídricos",
+        "capacidade_uso": "Capacidade de uso do solo",
+    }
+    compl: list[str] = []
+    for k, v in imovel.items():
+        if k in _skip or v in (None, "", 0, False):
+            continue
+        compl.append(f"{_label.get(k, k)}: {v}")
+
+    blocos = [
+        "🔴 LOCALIZAÇÃO — filtro OBRIGATÓRIO (não substituir por outros bairros ou cidades):\n"
+        + "\n".join(f"   {l}" for l in loc)
+    ]
+    if princ:
+        blocos.append(
+            "🟡 CARACTERÍSTICAS PRINCIPAIS — priorizar similaridade:\n"
+            + "\n".join(f"   {l}" for l in princ)
+        )
+    if compl:
+        blocos.append(
+            "🔵 COMPLEMENTARES:\n"
+            + "\n".join(f"   {l}" for l in compl)
+        )
+    return "\n\n".join(blocos), area
+
+
 def buscar_comparaveis(imovel: dict, tipo_rotulo: str = "") -> RespostaIA:
     """
     Pesquisa anúncios reais de imóveis comparáveis na web (Gemini + Google Search).
@@ -401,50 +550,70 @@ def buscar_comparaveis(imovel: dict, tipo_rotulo: str = "") -> RespostaIA:
     if not prov or not prov.disponivel():
         return RespostaIA(False, erro="IA não configurada. Veja como ativar no aviso da página.")
 
-    dados_txt = "\n".join(
-        f"{k}: {v}" for k, v in imovel.items() if v not in (None, "", 0, False)
-    ) or "(poucos dados informados)"
+    descricao, _ = _descrever_imovel_para_busca(imovel, tipo_rotulo or "imóvel")
 
-    prompt_base = (
-        "Liste ANÚNCIOS de imóveis À VENDA comparáveis ao imóvel abaixo "
-        f"(tipo: {tipo_rotulo or 'imóvel'}), na MESMA cidade/bairro ou proximidades, "
-        f"com porte e padrão semelhantes.\n"
-        "Traga de 5 a 8 comparáveis. Responda APENAS com um ARRAY JSON válido (sem nenhum "
-        "texto fora dele e sem cercas de código). Cada item EXATAMENTE com estas chaves:\n"
+    nome_cond = (imovel.get("nome_condominio") or "").strip()
+    prioridade_cond = (
+        f"PRIORIDADE MÁXIMA: buscar anúncios DENTRO do mesmo condomínio/edifício "
+        f"'{nome_cond}'. Só ampliar para o bairro se não houver comparáveis suficientes "
+        "no mesmo empreendimento.\n"
+    ) if nome_cond else ""
+
+    _schema = (
         '{"descricao":"", "fonte":"", "link":"", "preco_total":0, "area":0, '
-        '"conservacao":"", "obs":""}\n'
-        "- preco_total: número em reais, apenas dígitos (sem 'R$' e sem separador de milhar).\n"
+        '"conservacao":"", "obs":""}'
+    )
+    _instrucoes = (
+        "Traga de 5 a 8 comparáveis. Responda APENAS com um ARRAY JSON válido "
+        "(sem texto fora dele e sem cercas de código). Cada item EXATAMENTE com estas chaves:\n"
+        f"{_schema}\n"
+        "- preco_total: número em reais, apenas dígitos (sem 'R$', sem separador de milhar).\n"
         "- area: número em m² (privativa/útil quando possível), com ponto decimal.\n"
         "- fonte: nome do portal/origem (ex.: OLX, ZAP, Viva Real, Imobiliária).\n"
-        "- link: URL do anúncio (string vazia se não tiver).\n"
+        "- link: URL completa e real do anúncio encontrado; deixe string vazia SOMENTE se não "
+        "houver URL disponível para aquele anúncio específico.\n"
         "- conservacao e obs: opcionais (string vazia se não souber).\n"
-        f"=== IMÓVEL AVALIANDO ===\n{dados_txt}\n"
     )
+
     prompt_grounded = (
-        "Pesquise na web ANÚNCIOS REAIS e ATUAIS. " + prompt_base
-        + f"Priorize os portais: {_FONTES_SUGERIDAS}. "
-        "NÃO invente anúncios nem links. Se não encontrar dados confiáveis, retorne [].\n"
+        "Pesquise na web ANÚNCIOS REAIS e ATUAIS de imóveis à venda.\n"
+        f"{prioridade_cond}"
+        "LOCALIZAÇÃO É FILTRO RÍGIDO: traga SOMENTE imóveis no mesmo bairro e cidade "
+        "do imóvel avaliando — não substituir por outras cidades ou bairros, mesmo que "
+        "o mercado seja semelhante.\n"
+        "Para cada anúncio encontrado, copie a URL COMPLETA e REAL da página do anúncio "
+        "para o campo 'link'. Use apenas URLs que você efetivamente consultou na pesquisa.\n\n"
+        f"{_instrucoes}\n"
+        f"Portais sugeridos: {_FONTES_SUGERIDAS}.\n\n"
+        f"=== IMÓVEL AVALIANDO ===\n{descricao}\n"
+    )
+
+    prompt_fallback = (
+        "Liste anúncios de imóveis à venda semelhantes ao imóvel abaixo.\n"
+        f"{prioridade_cond}"
+        "LOCALIZAÇÃO É FILTRO RÍGIDO: SOMENTE no mesmo bairro e cidade.\n"
+        "Preencha 'link' como string vazia caso não tenha a URL do anúncio.\n"
+        "Use intervalos típicos do mercado da região se não tiver anúncios específicos.\n\n"
+        f"{_instrucoes}\n"
+        f"=== IMÓVEL AVALIANDO ===\n{descricao}\n"
     )
 
     # Passo 1 — com grounding (anúncios reais)
     resp = prov.buscar(prompt_grounded, sistema=_SISTEMA_AVALIADOR)
     texto_bruto = resp.texto if resp.ok else ""
     comps = _parse_comparaveis(texto_bruto) if resp.ok else []
+    if comps and resp.fontes_grounding:
+        _backfill_links(comps, resp.fontes_grounding)
 
     # Passo 2 — fallback sem grounding (sugestões a partir do conhecimento do modelo)
     if not comps:
-        prompt_fallback = (
-            prompt_base
-            + "OBS: não é necessário ter URL real — preencha 'link' como string vazia. "
-            "Use intervalos típicos do mercado da região se não tiver anúncios específicos.\n"
-        )
         resp2 = prov.gerar(prompt_fallback, sistema=_SISTEMA_AVALIADOR, temperatura=0.5)
         if resp2.ok:
             comps2 = _parse_comparaveis(resp2.texto)
             if comps2:
                 comps = comps2
                 texto_bruto = resp2.texto
-                resp = resp2  # mantém erro/ok do passo que conseguiu
+                resp = resp2
 
     resp.comparaveis = comps
     if not comps:

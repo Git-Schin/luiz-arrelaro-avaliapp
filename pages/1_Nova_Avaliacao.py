@@ -579,6 +579,8 @@ def render_passo_1():
     with c2:
         _render_campo(campos_loc["numero"], "f_ident")
 
+    _render_campo(campos_loc["nome_condominio"], "f_ident")
+
     c1, c2 = st.columns(2)
     with c1:
         _render_campo(campos_loc["bairro"], "f_ident")

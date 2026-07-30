@@ -104,6 +104,8 @@ GRUPO_LOCALIZACAO = {
          "ajuda": "Preenchido pelo CEP — confira."},
         {"key": "numero", "label": "Número", "tipo": "text",
          "ajuda": "CEP não traz o número — digite aqui."},
+        {"key": "nome_condominio", "label": "Condomínio / Edifício", "tipo": "text",
+         "ajuda": "Nome do condomínio ou edifício, se houver. Essencial para a IA buscar comparáveis no mesmo empreendimento."},
         {"key": "bairro", "label": "Bairro", "tipo": "text", "obrigatorio": True,
          "ajuda": "Preenchido pelo CEP — confira."},
         {"key": "cidade_uf", "label": "Cidade/UF", "tipo": "text", "obrigatorio": True,
