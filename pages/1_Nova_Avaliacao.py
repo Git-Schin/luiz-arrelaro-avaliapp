@@ -29,6 +29,10 @@ _RESET_EXATOS = {
     "comparaveis_importados", "ocr_sugestoes", "ia_analise", "ia_textos",
     "fotos_imovel", "fotos_uploader", "import_rev",
     "rascunho_salvo_em", "tipo_imovel_sel", "_geo_precisao", "_geo_auto_tentado",
+    # comparáveis — evita contaminação entre avaliações diferentes
+    "_df_comparaveis", "_comp_base_carregado", "_edic_hidratado",
+    "_auto_fatores", "_expoente_area", "_tem_conservacao",
+    "_estado_avaliando", "_area_avaliando", "_ultimo_passo_render",
 }
 if st.session_state.pop("_resetar_form", False):
     for _k in list(st.session_state.keys()):
@@ -61,6 +65,9 @@ if _qp_r and not st.session_state.get("edicao"):
         st.session_state["edicao_id"] = _row["id"]
         st.session_state.pop("_edic_hidratado", None)
         st.session_state.pop("wizard_passo", None)
+        # Descarta comparáveis da sessão anterior para não contaminar este rascunho
+        st.session_state.pop("_df_comparaveis", None)
+        st.session_state.pop("_comp_base_carregado", None)
 
 # ============================================================================
 # EDIÇÃO (vinda do Histórico ou da URL) — pré-carrega valores
