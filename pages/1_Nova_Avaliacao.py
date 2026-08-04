@@ -28,7 +28,8 @@ _RESET_EXATOS = {
     "edicao", "edicao_id", "ultimo_resultado", "ultimo_resultado_obj",
     "comparaveis_importados", "ocr_sugestoes", "ia_analise", "ia_textos",
     "fotos_imovel", "fotos_uploader", "import_rev",
-    "rascunho_salvo_em", "tipo_imovel_sel", "_geo_precisao", "_geo_auto_tentado",
+    "rascunho_salvo_em", "tipo_imovel_sel", "tipo_imovel_label",
+    "_geo_precisao", "_geo_auto_tentado",
     # comparáveis — evita contaminação entre avaliações diferentes
     "_df_comparaveis", "_comp_base_carregado", "_edic_hidratado",
     "_auto_fatores", "_expoente_area", "_tem_conservacao",
@@ -634,6 +635,12 @@ def render_passo_1():
 
     # Tipo de imóvel
     idx = tipo_keys.index(tipo_key) if tipo_key in tipo_keys else 0
+    # Sincroniza o widget com tipo_key (que pode ter sido definido pela hidratação
+    # ao abrir um rascunho). Sem isso, um valor antigo em session_state pode
+    # sobrescrever o tipo correto e fazer as características aparecerem em branco.
+    _label_esperado = tipo_labels[idx]
+    if st.session_state.get("tipo_imovel_label") != _label_esperado:
+        st.session_state["tipo_imovel_label"] = _label_esperado
     novo_label = st.selectbox("Tipo de imóvel", tipo_labels, index=idx, key="tipo_imovel_label")
     novo_tipo = tipo_keys[tipo_labels.index(novo_label)]
     if novo_tipo != tipo_key:

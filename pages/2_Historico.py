@@ -58,6 +58,8 @@ for a in avals:
                 st.session_state.pop("_edic_hidratado", None)
                 st.session_state.pop("wizard_passo", None)
                 st.session_state.pop("_comp_base_carregado", None)
+                st.session_state.pop("_df_comparaveis", None)
+                st.session_state.pop("tipo_imovel_label", None)
                 st.switch_page("pages/1_Nova_Avaliacao.py")
         with c2:
             st.download_button("📄 PTAM",
