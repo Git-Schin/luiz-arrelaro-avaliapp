@@ -482,6 +482,12 @@ def _lista_para_df_comparaveis(lista: list[dict], estado_default: str = "Regular
             "F. Conserv.": float(fat.get("f_conservacao") or 1.0),
             "F. Padrão": float(fat.get("f_padrao") or 1.0),
             "F. Outros": float(fat.get("f_outros") or 1.0),
+            # Características do comparável (para auto-cálculo de F. Padrão e F. Outros)
+            "Quartos_comp": int(c.get("quartos_comp") or 0),
+            "Suítes_comp": int(c.get("suites_comp") or 0),
+            "Vagas_comp": int(c.get("vagas_comp") or 0),
+            "Padrão_comp": c.get("padrao_comp") or "",
+            "Mesmo bairro": bool(c.get("mesmo_bairro", True)),
         })
     return pd.DataFrame(rows)
 
@@ -516,6 +522,12 @@ def _df_comparaveis_para_lista(df) -> list[dict]:
                 "f_padrao": float(row.get("F. Padrão") or 1.0),
                 "f_outros": float(row.get("F. Outros") or 1.0),
             },
+            # Características do comparável
+            "quartos_comp": F._safe_int(row.get("Quartos_comp")),
+            "suites_comp": F._safe_int(row.get("Suítes_comp")),
+            "vagas_comp": F._safe_int(row.get("Vagas_comp")),
+            "padrao_comp": str(row.get("Padrão_comp") or ""),
+            "mesmo_bairro": bool(row.get("Mesmo bairro", True)),
         })
     return out
 
@@ -776,6 +788,8 @@ def _coleta_para_linha(c: dict, estado_avaliando: str, incluir: bool = True) -> 
         "Conservação": c.get("conservacao") or estado_avaliando,
         "F. Oferta": F.FATOR_OFERTA_PADRAO, "F. Localiz.": 1.0, "F. Área": 1.0,
         "F. Conserv.": 1.0, "F. Padrão": 1.0, "F. Outros": 1.0,
+        "Quartos_comp": 0, "Suítes_comp": 0, "Vagas_comp": 0,
+        "Padrão_comp": "", "Mesmo bairro": True,
     }
 
 
@@ -805,10 +819,13 @@ def render_passo_4():
 
     # Cálculo automático dos fatores Área e Conservação
     auto_fatores = st.checkbox(
-        "🔧 Calcular **F. Área** e **F. Conservação** automaticamente (recomendado)",
+        "🔧 Calcular **F. Área**, **F. Conservação**, **F. Padrão** e **F. Outros** automaticamente (recomendado)",
         value=True, key="auto_fatores_chk",
-        help="F. Área pela razão de áreas com expoente; F. Conservação por Ross-Heidecke. "
-             "Desligue para informar esses fatores manualmente na tabela.",
+        help="F. Área pela razão de áreas com expoente; F. Conservação por Ross-Heidecke; "
+             "F. Padrão por índices IBAPE-SP; F. Outros por diferenças de quartos/suítes/vagas. "
+             "Preencha as colunas de características (Quartos_comp, Padrão_comp etc.) na tabela "
+             "para ativar o cálculo de F. Padrão e F. Outros. "
+             "Desligue para informar todos os fatores manualmente.",
     )
     expoente_area = F.EXPOENTE_AREA_PADRAO
     if auto_fatores:
@@ -926,6 +943,8 @@ def render_passo_4():
             "F. Oferta": F.FATOR_OFERTA_PADRAO,
             "F. Localiz.": 1.0, "F. Área": 1.0, "F. Conserv.": 1.0,
             "F. Padrão": 1.0, "F. Outros": 1.0,
+            "Quartos_comp": 0, "Suítes_comp": 0, "Vagas_comp": 0,
+            "Padrão_comp": "", "Mesmo bairro": True,
         } for _ in range(3)])
 
     # Importações pendentes (IA/CSV/texto) são absorvidas no df_base e a
@@ -939,6 +958,11 @@ def render_passo_4():
     cols_ocultas = ["F. Área", "F. Conserv."] if auto_fatores else []
     if not tem_conservacao:
         cols_ocultas.append("Conservação")
+    # Colunas de características só aparecem quando auto_fatores está ligado
+    cols_caracteristicas = (
+        ["Quartos_comp", "Suítes_comp", "Vagas_comp", "Padrão_comp", "Mesmo bairro"]
+        if auto_fatores else []
+    )
 
     col_config = {
         "Fonte": st.column_config.SelectboxColumn(options=TI.FONTE_COMPARAVEL),
@@ -950,18 +974,94 @@ def render_passo_4():
         "Conservação": st.column_config.SelectboxColumn(options=TI.ESTADO_CONSERVACAO),
         **{c: st.column_config.NumberColumn(format="%.3f", min_value=0.0)
            for c in ["F. Oferta", "F. Localiz.", "F. Área", "F. Conserv.", "F. Padrão", "F. Outros"]},
+        "Quartos_comp": st.column_config.NumberColumn(
+            "Quartos", help="Nº de quartos do comparável", min_value=0, max_value=20, step=1, format="%d"),
+        "Suítes_comp": st.column_config.NumberColumn(
+            "Suítes", help="Nº de suítes do comparável", min_value=0, max_value=10, step=1, format="%d"),
+        "Vagas_comp": st.column_config.NumberColumn(
+            "Vagas", help="Nº de vagas do comparável", min_value=0, max_value=10, step=1, format="%d"),
+        "Padrão_comp": st.column_config.SelectboxColumn(
+            "Padrão", help="Padrão construtivo do comparável",
+            options=[""] + TI.PADRAO_CONSTRUTIVO),
+        "Mesmo bairro": st.column_config.CheckboxColumn(
+            "Mesmo bairro?", help="O comparável fica no mesmo bairro do avaliando?"),
     }
 
     # Key fixa — deltas das edições do usuário sobrevivem entre reruns no
     # mesmo passo 4. Para evitar duplicação ao reentrar no passo 4 ou ao
     # importar comparáveis novos, o widget state é apagado manualmente em
     # session_state[_EDITOR_KEY] nos dois pontos correspondentes.
+    # Ordem das colunas: principais primeiro, características dos comparáveis ao final
+    _cols_principais = [
+        c for c in df_base.columns
+        if c not in cols_ocultas and c not in ["Quartos_comp", "Suítes_comp", "Vagas_comp", "Padrão_comp", "Mesmo bairro"]
+    ]
     df_edit = st.data_editor(
         df_base, num_rows="dynamic", use_container_width=True,
         key=_EDITOR_KEY,
-        column_order=[c for c in df_base.columns if c not in cols_ocultas],
+        column_order=_cols_principais + cols_caracteristicas,
         column_config=col_config,
     )
+
+    # Diferenças detectadas — resumo do que será auto-calculado
+    if auto_fatores and cols_caracteristicas:
+        padrao_av = imovel.get("padrao", "")
+        quartos_av = F._safe_int(imovel.get("quartos"))
+        suites_av  = F._safe_int(imovel.get("suites"))
+        vagas_av   = F._safe_int(imovel.get("vagas"))
+
+        linhas_dif = []
+        for i, row in df_edit.iterrows():
+            nome = str(row.get("Descrição") or "").strip() or f"Linha {i + 1}"
+            preco = float(row.get("Preço total (R$)") or 0)
+            area  = float(row.get("Área (m²)") or 0)
+            if not nome.strip() and preco == 0 and area == 0:
+                continue
+
+            qc = F._safe_int(row.get("Quartos_comp"))
+            sc = F._safe_int(row.get("Suítes_comp"))
+            vc = F._safe_int(row.get("Vagas_comp"))
+            pc = str(row.get("Padrão_comp") or "").strip()
+            mb = bool(row.get("Mesmo bairro", True))
+
+            # F. Padrão sugerido
+            f_pad_sug = F.fator_padrao(padrao_av, pc) if (padrao_av and pc) else None
+            # F. Outros sugerido
+            tem_caract = bool(qc or sc or vc)
+            if tem_caract:
+                f_out_sug, justas = F.fator_outros_caracteristicas(
+                    quartos_av, qc, suites_av, sc, vagas_av, vc)
+            else:
+                f_out_sug, justas = None, []
+
+            # Aviso de localização diferente
+            loc_aviso = "" if mb else "⚠️ bairro diferente — ajuste F. Localiz. manualmente"
+
+            linhas_dif.append({
+                "Comparável": nome[:30],
+                "Quartos": f"{quartos_av} → {qc}" if qc else "—",
+                "Suítes":  f"{suites_av} → {sc}"  if sc else "—",
+                "Vagas":   f"{vagas_av} → {vc}"   if vc else "—",
+                "Padrão":  f"{padrao_av} → {pc}"  if pc else "—",
+                "F. Padrão sugerido": f"{f_pad_sug:.3f}" if f_pad_sug else "—",
+                "F. Outros sugerido": f"{f_out_sug:.3f} ({'; '.join(justas)})" if f_out_sug else "—",
+                "Localização": "✅ mesmo bairro" if mb else loc_aviso,
+            })
+
+        if linhas_dif:
+            with st.expander("📊 Diferenças detectadas (base dos fatores automáticos)", expanded=False):
+                st.caption(
+                    "Preencha **Quartos**, **Suítes**, **Vagas** e **Padrão** do comparável nas "
+                    "colunas à direita da tabela para que F. Padrão e F. Outros sejam calculados "
+                    "automaticamente. O avaliador pode sobrescrever qualquer fator manualmente."
+                )
+                st.dataframe(pd.DataFrame(linhas_dif), use_container_width=True, hide_index=True)
+                st.caption(
+                    "**Índices IBAPE-SP usados para F. Padrão:** "
+                    + " · ".join(f"{k}: {v}" for k, v in F.PADRAO_INDICES.items())
+                    + f"  |  **F. Outros:** {F.PERC_POR_QUARTO*100:.0f}% por quarto · "
+                    f"{F.PERC_POR_SUITE*100:.0f}% por suíte · {F.PERC_POR_VAGA*100:.0f}% por vaga"
+                )
 
     # Prévia "Fatores aplicados" (padrões em cinza/itálico)
     _FATOR_DEFAULTS = {
@@ -1139,9 +1239,29 @@ def render_passo_5():
                 f_area = F.fator_area(area_avaliando, area_cp, expoente_area)
                 f_conserv = (F.fator_conservacao(estado_avaliando, estado_cp)
                              if tem_conservacao else 1.0)
+                # F. Padrão — auto se padrão do comparável estiver preenchido
+                padrao_av = imovel.get("padrao", "")
+                padrao_cp = str(row.get("Padrão_comp") or "").strip()
+                f_padrao = (F.fator_padrao(padrao_av, padrao_cp)
+                            if padrao_av and padrao_cp
+                            else _num(row.get("F. Padrão"), 1.0))
+                # F. Outros — auto se alguma característica do comparável estiver preenchida
+                qc = F._safe_int(row.get("Quartos_comp"))
+                sc = F._safe_int(row.get("Suítes_comp"))
+                vc = F._safe_int(row.get("Vagas_comp"))
+                if qc or sc or vc:
+                    f_outros, _ = F.fator_outros_caracteristicas(
+                        F._safe_int(imovel.get("quartos")), qc,
+                        F._safe_int(imovel.get("suites")),  sc,
+                        F._safe_int(imovel.get("vagas")),   vc,
+                    )
+                else:
+                    f_outros = _num(row.get("F. Outros"), 1.0)
             else:
-                f_area = _num(row.get("F. Área"), 1.0)
+                f_area    = _num(row.get("F. Área"), 1.0)
                 f_conserv = _num(row.get("F. Conserv."), 1.0)
+                f_padrao  = _num(row.get("F. Padrão"), 1.0)
+                f_outros  = _num(row.get("F. Outros"), 1.0)
             comparaveis.append(Comparavel(
                 descricao=str(row.get("Descrição") or ""),
                 fonte=str(row.get("Fonte") or ""),
@@ -1156,8 +1276,8 @@ def render_passo_5():
                     "f_localizacao": _num(row.get("F. Localiz."), 1.0),
                     "f_area": round(f_area, 4),
                     "f_conservacao": round(f_conserv, 4),
-                    "f_padrao": _num(row.get("F. Padrão"), 1.0),
-                    "f_outros": _num(row.get("F. Outros"), 1.0),
+                    "f_padrao": round(f_padrao, 4),
+                    "f_outros": round(f_outros, 4),
                 },
             ))
 

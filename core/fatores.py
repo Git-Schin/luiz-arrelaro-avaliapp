@@ -113,6 +113,79 @@ def fator_area(area_avaliando: float, area_comparavel: float,
 
 
 # ---------------------------------------------------------------------------
+# Fator Padrão — índices de referência por padrão construtivo
+# Base: tabelas técnicas do IBAPE-SP (valores medianos).
+# F. Padrão = índice_avaliando / índice_comparável.
+# > 1 quando o comparável tem padrão inferior ao avaliando (precisa subir).
+# ---------------------------------------------------------------------------
+PADRAO_INDICES = {
+    "Mínimo":       0.40,
+    "Baixo":        0.65,
+    "Normal/Médio": 1.00,
+    "Alto":         1.45,
+    "Luxo":         2.00,
+}
+
+
+def fator_padrao(padrao_avaliando: str, padrao_comparavel: str) -> float:
+    """F. Padrão = índice do avaliando / índice do comparável (IBAPE)."""
+    idx_av = PADRAO_INDICES.get(padrao_avaliando)
+    idx_cp = PADRAO_INDICES.get(padrao_comparavel)
+    if not idx_av or not idx_cp or idx_cp <= 0:
+        return 1.0
+    return round(idx_av / idx_cp, 4)
+
+
+# Percentuais de ajuste por diferença unitária de característica.
+# Referência: prática de mercado residencial urbano brasileiro (valores conservadores).
+# O avaliador pode substituir o fator resultante manualmente na tabela.
+PERC_POR_QUARTO = 0.05   # 5% por quarto de diferença
+PERC_POR_SUITE  = 0.04   # 4% por suíte de diferença
+PERC_POR_VAGA   = 0.06   # 6% por vaga de diferença
+
+
+def _safe_int(v) -> int:
+    """Converte valor (string '2', '6+', float 2.0, None) para int com segurança."""
+    if v is None:
+        return 0
+    try:
+        return int(float(str(v).rstrip("+")))
+    except (ValueError, TypeError):
+        return 0
+
+
+def fator_outros_caracteristicas(
+    quartos_av: int, quartos_cp: int,
+    suites_av: int,  suites_cp: int,
+    vagas_av: int,   vagas_cp: int,
+) -> tuple[float, list[str]]:
+    """
+    Sugestão de F. Outros baseada em diferenças de quartos, suítes e vagas.
+
+    Convenção: fator > 1 quando o comparável é inferior ao avaliando
+    (tem menos quartos/suítes/vagas → precisa aumentar o valor homogeneizado).
+
+    Retorna (fator_arredondado, lista_de_justificativas).
+    """
+    fator = 1.0
+    justas: list[str] = []
+
+    for diff, perc, nome in [
+        (quartos_av - quartos_cp, PERC_POR_QUARTO, "quartos"),
+        (suites_av  - suites_cp,  PERC_POR_SUITE,  "suítes"),
+        (vagas_av   - vagas_cp,   PERC_POR_VAGA,   "vagas"),
+    ]:
+        if diff == 0:
+            continue
+        fator *= 1.0 + diff * perc
+        sinal = "+" if diff > 0 else ""
+        justas.append(f"{nome}: {sinal}{diff} ({sinal}{diff * perc * 100:.0f}%)")
+
+    fator = max(LIMITE_FATOR_MIN, min(LIMITE_FATOR_MAX, fator))
+    return round(fator, 4), justas
+
+
+# ---------------------------------------------------------------------------
 # Catálogo de fatores manuais/genéricos disponíveis na tela.
 # O avaliador informa o valor de cada fator por comparável (ou usa o padrão).
 # 'sentido' explica a leitura: fator > 1 valoriza o comparável em relação ao
