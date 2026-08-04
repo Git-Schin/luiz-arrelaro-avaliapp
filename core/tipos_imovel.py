@@ -81,6 +81,15 @@ POSICAO_SOLAR = ["Indiferente", "Manhã (leste)", "Tarde (oeste)", "Norte", "Sul
 TOPOGRAFIA = ["Plano", "Aclive", "Declive", "Irregular"]
 SITUACAO_TERRENO = ["Meio de quadra", "Esquina", "Encravado", "Frente para duas ruas"]
 
+# Listas para campos contáveis — evitam digitação manual e reduzem erros
+OPCOES_QUARTOS    = ["—", "1", "2", "3", "4", "5", "6", "7", "8+"]
+OPCOES_SUITES     = ["—", "0", "1", "2", "3", "4", "5+"]
+OPCOES_BANHEIROS  = ["—", "1", "2", "3", "4", "5", "6+"]
+OPCOES_VAGAS      = ["—", "0", "1", "2", "3", "4", "5", "6+"]
+OPCOES_ELEVADORES = ["—", "0", "1", "2", "3", "4+"]
+OPCOES_PAVIMENTOS = ["—"] + [str(i) for i in range(1, 16)] + ["16+"]
+OPCOES_ANDAR      = ["—"] + [str(i) for i in range(1, 51)] + ["50+"]
+
 # --- Grupos comuns a todos os tipos ---
 GRUPO_IDENTIFICACAO = {
     "titulo": "Identificação",
@@ -146,15 +155,15 @@ TIPOS_IMOVEL = {
                 {"key": "area_privativa", "label": "Área privativa", "tipo": "number",
                  "unidade": "m²", "obrigatorio": True},
                 {"key": "area_total", "label": "Área total (com comum)", "tipo": "number", "unidade": "m²"},
-                {"key": "andar", "label": "Andar/Pavimento", "tipo": "number"},
-                {"key": "quartos", "label": "Quartos", "tipo": "number"},
-                {"key": "suites", "label": "Suítes", "tipo": "number"},
-                {"key": "banheiros", "label": "Banheiros", "tipo": "number"},
-                {"key": "vagas", "label": "Vagas de garagem", "tipo": "number"},
+                {"key": "andar", "label": "Andar/Pavimento", "tipo": "select", "opcoes": OPCOES_ANDAR},
+                {"key": "quartos", "label": "Quartos", "tipo": "select", "opcoes": OPCOES_QUARTOS},
+                {"key": "suites", "label": "Suítes", "tipo": "select", "opcoes": OPCOES_SUITES},
+                {"key": "banheiros", "label": "Banheiros", "tipo": "select", "opcoes": OPCOES_BANHEIROS},
+                {"key": "vagas", "label": "Vagas de garagem", "tipo": "select", "opcoes": OPCOES_VAGAS},
                 {"key": "varanda", "label": "Varanda/Sacada", "tipo": "checkbox"},
                 CAMPO_IDADE, CAMPO_PADRAO, CAMPO_CONSERVACAO,
                 {"key": "posicao_solar", "label": "Posição solar", "tipo": "select", "opcoes": POSICAO_SOLAR},
-                {"key": "elevadores", "label": "Elevadores no prédio", "tipo": "number"},
+                {"key": "elevadores", "label": "Elevadores no prédio", "tipo": "select", "opcoes": OPCOES_ELEVADORES},
                 {"key": "condominio", "label": "Valor do condomínio", "tipo": "number", "unidade": "R$/mês"},
                 {"key": "lazer", "label": "Itens de lazer do condomínio", "tipo": "textarea"},
             ]},
@@ -172,11 +181,11 @@ TIPOS_IMOVEL = {
                  "unidade": "m²", "obrigatorio": True},
                 {"key": "area_construida", "label": "Área construída", "tipo": "number",
                  "unidade": "m²", "obrigatorio": True},
-                {"key": "pavimentos", "label": "Pavimentos", "tipo": "number"},
-                {"key": "quartos", "label": "Quartos", "tipo": "number"},
-                {"key": "suites", "label": "Suítes", "tipo": "number"},
-                {"key": "banheiros", "label": "Banheiros", "tipo": "number"},
-                {"key": "vagas", "label": "Vagas de garagem", "tipo": "number"},
+                {"key": "pavimentos", "label": "Pavimentos", "tipo": "select", "opcoes": OPCOES_PAVIMENTOS},
+                {"key": "quartos", "label": "Quartos", "tipo": "select", "opcoes": OPCOES_QUARTOS},
+                {"key": "suites", "label": "Suítes", "tipo": "select", "opcoes": OPCOES_SUITES},
+                {"key": "banheiros", "label": "Banheiros", "tipo": "select", "opcoes": OPCOES_BANHEIROS},
+                {"key": "vagas", "label": "Vagas de garagem", "tipo": "select", "opcoes": OPCOES_VAGAS},
                 CAMPO_IDADE, CAMPO_PADRAO, CAMPO_CONSERVACAO,
                 {"key": "topografia", "label": "Topografia do terreno", "tipo": "select", "opcoes": TOPOGRAFIA},
                 {"key": "benfeitorias", "label": "Benfeitorias (piscina, edícula, etc.)", "tipo": "textarea"},
@@ -218,7 +227,7 @@ TIPOS_IMOVEL = {
                  "unidade": "m²", "obrigatorio": True},
                 {"key": "pe_direito", "label": "Pé-direito", "tipo": "number", "unidade": "m"},
                 {"key": "testada", "label": "Testada/visibilidade", "tipo": "number", "unidade": "m"},
-                {"key": "vagas", "label": "Vagas", "tipo": "number"},
+                {"key": "vagas", "label": "Vagas", "tipo": "select", "opcoes": OPCOES_VAGAS},
                 CAMPO_IDADE, CAMPO_PADRAO, CAMPO_CONSERVACAO,
                 {"key": "fluxo", "label": "Fluxo/localização comercial", "tipo": "textarea",
                  "ajuda": "Avenida movimentada, centro, galeria, etc."},

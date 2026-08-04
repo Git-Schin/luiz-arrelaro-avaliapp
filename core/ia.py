@@ -334,6 +334,16 @@ def analisar_comparaveis(dados: dict) -> RespostaIA:
     return prov.gerar(prompt, sistema=_SISTEMA_AVALIADOR, temperatura=0.3)
 
 
+def _to_int_campo(v) -> int | None:
+    """Converte campo contável (string '2', '6+', int ou float) em int."""
+    if v is None:
+        return None
+    try:
+        return int(float(str(v).rstrip("+")))
+    except (ValueError, TypeError):
+        return None
+
+
 def _num_br(v) -> float:
     """Converte número possivelmente em formato BR ('850.000,00', 'R$ 1.200') em float."""
     import re
@@ -477,17 +487,19 @@ def _descrever_imovel_para_busca(imovel: dict, tipo_rotulo: str) -> tuple[str, f
         area_min = round(area * 0.75)
         area_max = round(area * 1.25)
         princ.append(f"{area_label}: {area:.0f} m²  (buscar entre {area_min} e {area_max} m²)")
-    quartos = imovel.get("quartos")
-    suites = imovel.get("suites")
-    if quartos:
-        s = f"Quartos: {int(quartos)}"
-        if suites:
-            s += f" (sendo {int(suites)} suíte{'s' if int(suites) > 1 else ''})"
+    quartos_n = _to_int_campo(imovel.get("quartos"))
+    suites_n  = _to_int_campo(imovel.get("suites"))
+    if quartos_n is not None:
+        s = f"Quartos: {quartos_n}"
+        if suites_n is not None:
+            s += f" (sendo {suites_n} suíte{'s' if suites_n > 1 else ''})"
         princ.append(s)
-    if imovel.get("vagas"):
-        princ.append(f"Vagas de garagem: {int(imovel['vagas'])}")
-    if imovel.get("banheiros"):
-        princ.append(f"Banheiros: {int(imovel['banheiros'])}")
+    vagas_n = _to_int_campo(imovel.get("vagas"))
+    if vagas_n is not None:
+        princ.append(f"Vagas de garagem: {vagas_n}")
+    banheiros_n = _to_int_campo(imovel.get("banheiros"))
+    if banheiros_n is not None:
+        princ.append(f"Banheiros: {banheiros_n}")
     if imovel.get("padrao"):
         princ.append(f"Padrão construtivo: {imovel['padrao']}")
     if imovel.get("area_terreno") and imovel.get("area_construida"):
@@ -629,6 +641,106 @@ def buscar_comparaveis(imovel: dict, tipo_rotulo: str = "") -> RespostaIA:
     else:
         resp.ok = True
         resp.erro = ""
+    return resp
+
+
+def extrair_campos_texto(texto: str, tipo_imovel: str, tipo_rotulo: str) -> RespostaIA:
+    """
+    Extrai campos do formulário a partir de descrição livre do imóvel.
+    Retorna `campos` (dict) no mesmo formato do OCR — para o painel de sugestões.
+    """
+    prov = _provedor()
+    if not prov or not prov.disponivel():
+        return RespostaIA(False, erro="IA não configurada. Veja como ativar no aviso da página.")
+
+    from core.tipos_imovel import TIPOS_IMOVEL, GRUPO_IDENTIFICACAO, GRUPO_LOCALIZACAO
+
+    # Campos que não faz sentido extrair de descrição livre
+    _ignorar = {
+        "geo", "finalidade", "solicitante", "matricula", "inscricao_iptu",
+        "infraestrutura", "lazer", "benfeitorias", "recursos_hidricos",
+        "culturas", "capacidade_uso", "georreferenciamento",
+    }
+
+    tipo_def = TIPOS_IMOVEL.get(tipo_imovel, {})
+    todos_grupos = [GRUPO_IDENTIFICACAO, GRUPO_LOCALIZACAO]
+    for grupo in tipo_def.get("grupos", []):
+        titulo = grupo["titulo"].lower()
+        if not (titulo.startswith("identifi") or titulo.startswith("localiza")):
+            todos_grupos.append(grupo)
+
+    campos_template: dict[str, str] = {}   # key → label
+    campos_opcoes: dict[str, list] = {}    # key → lista de opções válidas
+
+    for grupo in todos_grupos:
+        for campo in grupo.get("campos", []):
+            k = campo["key"]
+            if k in _ignorar:
+                continue
+            campos_template[k] = campo["label"]
+            if campo["tipo"] == "select":
+                campos_opcoes[k] = [o for o in campo.get("opcoes", []) if o != "—"]
+
+    schema = {k: "" for k in campos_template}
+
+    linhas_campos = "\n".join(f'  "{k}": "{lbl}"' for k, lbl in campos_template.items())
+    linhas_opcoes = "\n".join(
+        f'  "{k}": use exatamente uma de {opts}'
+        for k, opts in campos_opcoes.items() if opts
+    )
+
+    prompt = (
+        f"Analise a descrição de um imóvel ({tipo_rotulo}) e preencha um formulário.\n\n"
+        f"CAMPOS DISPONÍVEIS (chave: rótulo):\n{linhas_campos}\n\n"
+        + (f"OPÇÕES PERMITIDAS para campos com lista fixa (use exatamente uma delas ou vazio):\n{linhas_opcoes}\n\n" if linhas_opcoes else "")
+        + f"DESCRIÇÃO DO IMÓVEL:\n{texto}\n\n"
+        "Responda APENAS com um objeto JSON válido usando as chaves acima. "
+        "Preencha apenas os campos mencionados na descrição. "
+        "Use string vazia para os não mencionados. "
+        "Números (área, preços): apenas dígitos com ponto decimal (ex: 89.5). "
+        "Campos contáveis como quartos/suítes: retorne como string sem decimais (ex: \"3\").\n\n"
+        f"JSON:\n{json.dumps(schema, ensure_ascii=False)}"
+    )
+
+    resp = prov.gerar(prompt, temperatura=0.1)
+    if not resp.ok:
+        return resp
+
+    bruto = resp.texto.strip()
+    if bruto.startswith("```"):
+        bruto = bruto.strip("`")
+        bruto = bruto[4:].strip() if bruto.lower().startswith("json") else bruto
+    try:
+        extraido = json.loads(bruto)
+    except (ValueError, TypeError):
+        resp.campos = {}
+        return resp
+
+    if not isinstance(extraido, dict):
+        resp.campos = {}
+        return resp
+
+    campos_limpos: dict[str, str] = {}
+    for k, v in extraido.items():
+        if k not in campos_template:
+            continue
+        v_str = ("" if v is None else str(v)).strip()
+        if not v_str:
+            continue
+        # Normaliza valores de campos com opções fixas
+        if k in campos_opcoes:
+            opts = campos_opcoes[k]
+            if v_str not in opts:
+                # Tenta conversão numérica (ex: "2.0" → "2")
+                try:
+                    v_str = str(int(float(v_str)))
+                except (ValueError, TypeError):
+                    v_str = ""
+            if v_str not in opts:
+                continue  # descarta valor inválido
+        campos_limpos[k] = v_str
+
+    resp.campos = campos_limpos
     return resp
 
 

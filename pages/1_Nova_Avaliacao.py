@@ -22,7 +22,7 @@ from core import pdf as PDFGEN
 # ============================================================================
 _RESET_PREFIXOS = (
     "f_", "ia_", "ocr", "editor_comparaveis", "rmfoto_", "csv_", "txt_", "btn_",
-    "step_btn_", "nav_", "wizard_", "_pend_", "_p_",
+    "step_btn_", "nav_", "wizard_", "_pend_", "_p_", "assistente_",
 )
 _RESET_EXATOS = {
     "edicao", "edicao_id", "ultimo_resultado", "ultimo_resultado_obj",
@@ -141,19 +141,22 @@ def _get_field(wkey: str):
     return v
 
 
+_VALORES_VAZIOS = (None, "", 0, False, "—")
+
+
 def _construir_imovel() -> dict:
     """Lê o session_state (com fallback pra shadow) e retorna o dict do imóvel."""
     imovel = {}
     for grupo in [TI.GRUPO_IDENTIFICACAO, TI.GRUPO_LOCALIZACAO]:
         for campo in grupo["campos"]:
             v = _get_field(f"f_ident_{campo['key']}")
-            if v not in (None, "", 0, False):
+            if v not in _VALORES_VAZIOS:
                 imovel[campo["key"]] = v
     for grupo in tipo_def["grupos"]:
         if grupo["titulo"].lower().startswith("caracter"):
             for campo in grupo["campos"]:
                 v = _get_field(f"f_{tipo_key}_{campo['key']}")
-                if v not in (None, "", 0, False):
+                if v not in _VALORES_VAZIOS:
                     imovel[campo["key"]] = v
     return imovel
 
@@ -206,12 +209,22 @@ def _render_campo(campo: dict, prefixo: str) -> None:
             try:
                 st.session_state[wkey] = float(st.session_state[wkey])
             except (TypeError, ValueError):
-                st.session_state[wkey] = 0.0
-        st.number_input(label, min_value=0.0, step=1.0, help=ajuda, key=wkey, **_kwargs)
+                del st.session_state[wkey]  # inválido: renderiza campo vazio
+        # value=None → campo inicia em branco (sem o "0" que o usuário precisa apagar).
+        # Se wkey já está em session_state, Streamlit ignora o value e usa o estado salvo.
+        st.number_input(label, min_value=0.0, step=1.0, value=None,
+                        help=ajuda, key=wkey, **_kwargs)
     elif tipo == "select":
         opts = campo["opcoes"]
-        if wkey not in st.session_state or st.session_state[wkey] not in opts:
-            st.session_state[wkey] = opts[0]
+        current = st.session_state.get(wkey)
+        if current not in opts:
+            # Retrocompatibilidade: registros antigos guardavam float (ex: 2.0)
+            # em campos agora convertidos para select — tenta mapear para string.
+            if isinstance(current, (int, float)):
+                candidate = str(int(current))
+                st.session_state[wkey] = candidate if candidate in opts else opts[0]
+            else:
+                st.session_state[wkey] = opts[0]
         st.selectbox(label, opts, help=ajuda, key=wkey, **_kwargs)
     elif tipo == "checkbox":
         if wkey not in st.session_state:
@@ -333,6 +346,52 @@ def _render_sugestoes_ocr() -> None:
                              use_container_width=True):
                     _ignorar_sugestao_ocr(k)
                     st.rerun()
+
+
+def _render_assistente_descricao() -> None:
+    """Expander 'Descreva o imóvel' — IA extrai campos e alimenta o painel de sugestões."""
+    _ia_status = IA.status()
+    with st.expander("✍️ Descrever o imóvel para a IA preencher o formulário", expanded=False):
+        if not _ia_status["configurada"]:
+            st.info("IA não configurada — ative sua chave no passo 2.")
+            return
+        st.caption(
+            "Descreva o imóvel com suas próprias palavras. A IA identifica os campos e sugere "
+            "os valores — você revisa e aceita campo a campo."
+        )
+        st.text_area(
+            "Descrição do imóvel",
+            height=110,
+            key="assistente_desc_txt",
+            placeholder=(
+                "Exemplo: Apartamento de 3 quartos sendo 1 suíte, 89 m² de área privativa, "
+                "2 vagas na garagem, 5º andar, prédio com 1 elevador, bairro Centro, "
+                "Itatiba/SP, estado de conservação bom, padrão normal."
+            ),
+        )
+        if st.button("🤖 Extrair e preencher campos", key="btn_assistente_extrair",
+                     disabled=not (st.session_state.get("assistente_desc_txt") or "").strip()):
+            txt = st.session_state.get("assistente_desc_txt", "").strip()
+            with st.spinner("Analisando descrição com IA..."):
+                resp = IA.extrair_campos_texto(txt, tipo_key, tipo_def["rotulo"])
+            if not resp.ok:
+                st.error(resp.erro)
+            elif resp.campos:
+                # Merge com sugestões existentes (OCR tem prioridade sobre texto)
+                sugest = dict(st.session_state.get("ocr_sugestoes") or {})
+                novos = {k: v for k, v in resp.campos.items() if k not in sugest}
+                sugest.update(novos)
+                st.session_state["ocr_sugestoes"] = sugest
+                st.success(
+                    f"{len(resp.campos)} campo(s) identificado(s). "
+                    "Revise as sugestões abaixo e aceite os corretos."
+                )
+                st.rerun()
+            else:
+                st.warning(
+                    "A IA não conseguiu identificar campos. "
+                    "Tente descrever com mais detalhes: quartos, área, andar, bairro, cidade."
+                )
 
 
 def _render_busca_cep(campo_cep: dict) -> None:
@@ -548,6 +607,11 @@ st.session_state["_ultimo_passo_render"] = passo
 def render_passo_1():
     st.subheader("Passo 1 · Identificação")
     st.caption("Quem está pedindo, para quê, e onde fica o imóvel.")
+
+    # Assistente de preenchimento por texto livre
+    _render_assistente_descricao()
+    # Painel de sugestões (OCR do passo 2 ou assistente de texto acima)
+    _render_sugestoes_ocr()
 
     # Tipo de imóvel
     idx = tipo_keys.index(tipo_key) if tipo_key in tipo_keys else 0
