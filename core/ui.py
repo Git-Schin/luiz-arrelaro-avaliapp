@@ -113,8 +113,85 @@ button[key^="step_btn_"] p {{
     text-align: center;
     margin: 0;
 }}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   RESPONSIVO — MOBILE (≤ 768 px)
+   ═══════════════════════════════════════════════════════════════════════ */
+@media screen and (max-width: 768px) {{
+
+    /* Padding da página menor */
+    .block-container {{
+        padding-top: 1rem !important;
+        padding-left: 0.75rem !important;
+        padding-right: 0.75rem !important;
+    }}
+
+    /* Colunas colapsam para coluna única */
+    [data-testid="stHorizontalBlock"] {{
+        flex-wrap: wrap !important;
+    }}
+    [data-testid="stColumn"] {{
+        width: 100% !important;
+        flex: 0 0 100% !important;
+        min-width: 100% !important;
+    }}
+
+    /* Botões maiores — área de toque adequada */
+    .stButton > button,
+    .stDownloadButton > button {{
+        min-height: 3rem !important;
+        font-size: 1rem !important;
+        padding: 0.5rem 0.75rem !important;
+        border-radius: 12px !important;
+    }}
+
+    /* Selects e inputs maiores */
+    [data-baseweb="select"] span,
+    [data-baseweb="input"] input,
+    [data-baseweb="textarea"] textarea {{
+        font-size: 1rem !important;
+    }}
+
+    /* Títulos menores para caber na tela */
+    h1 {{ font-size: 1.5rem !important; }}
+    h2 {{ font-size: 1.2rem !important; }}
+    h3 {{ font-size: 1.05rem !important; }}
+
+    /* Camera input ocupa toda a largura */
+    [data-testid="stCameraInput"] {{
+        width: 100% !important;
+    }}
+    [data-testid="stCameraInput"] > div {{
+        width: 100% !important;
+    }}
+
+    /* Sidebar ocupa largura razoável ao abrir */
+    [data-testid="stSidebar"] {{
+        min-width: 80vw !important;
+    }}
+
+    /* Tabelas com scroll horizontal */
+    [data-testid="stDataFrame"],
+    [data-testid="stDataEditor"] {{
+        overflow-x: auto !important;
+    }}
+
+    /* Esconde o texto longo nos botões do stepper no mobile */
+    button[key^="step_"] p {{
+        font-size: 0.8rem !important;
+    }}
+}}
 </style>
 """
+
+
+def detectar_mobile() -> bool:
+    """Detecta dispositivo móvel via User-Agent. Retorna True para mobile/tablet."""
+    try:
+        ua = st.context.headers.get("User-Agent", "")
+        return any(m in ua.lower() for m in ("mobile", "android", "iphone", "ipad", "tablet"))
+    except Exception:
+        return False
 
 
 def aplicar_estilo() -> None:
