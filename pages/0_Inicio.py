@@ -3,6 +3,7 @@ import streamlit as st
 
 from config import identidade as ID
 from core import db
+from core import vistoria_db as VDB_mod
 
 perfil = st.session_state.get("perfil", {})
 nome = perfil.get("nome") or st.session_state.get("user_email", "Usuário")
@@ -34,6 +35,29 @@ with col2:
     if avals:
         ultima = avals[0]
         st.caption(f"Última: {ultima['endereco'] or ultima['solicitante'] or '—'}")
+
+st.divider()
+
+# ── Módulo Vistoria ───────────────────────────────────────────────────────────
+st.subheader("📋 Vistoria de Imóvel para Locação")
+st.write(
+    "Registre o estado do imóvel cômodo a cômodo, com fotos e estados de conservação. "
+    "Gere o **Laudo de Vistoria** em PDF com página de assinatura — válido como documento "
+    "para locação (Lei 8.245/91). Suporta **entrada** e **saída** com comparativo automático."
+)
+cv1, cv2 = st.columns(2)
+with cv1:
+    if st.button("🔑 Nova Vistoria", use_container_width=True):
+        st.session_state["_resetar_vistoria"] = True
+        st.switch_page("pages/4_Vistoria.py")
+with cv2:
+    st.page_link("pages/5_Vistorias.py", label="📋 Ver histórico de vistorias", icon="🗂️")
+
+try:
+    n_vist = len(VDB_mod.listar(user_id=user_id))
+    st.caption(f"Vistorias registradas: {n_vist}")
+except Exception:
+    pass
 
 st.divider()
 with st.expander("⚖️ Aviso legal e metodologia"):

@@ -57,8 +57,12 @@ paginas = [
             icon=":material/space_dashboard:", default=True),
     st.Page("pages/1_Nova_Avaliacao.py", title="Nova Avaliação",
             icon=":material/add_home_work:"),
-    st.Page("pages/2_Historico.py", title="Histórico",
+    st.Page("pages/2_Historico.py", title="Histórico (Avaliações)",
             icon=":material/history:"),
+    st.Page("pages/4_Vistoria.py", title="Nova Vistoria",
+            icon=":material/home_search:"),
+    st.Page("pages/5_Vistorias.py", title="Histórico (Vistorias)",
+            icon=":material/fact_check:"),
     st.Page("pages/3_Perfil.py", title="Meu Perfil",
             icon=":material/manage_accounts:"),
 ]

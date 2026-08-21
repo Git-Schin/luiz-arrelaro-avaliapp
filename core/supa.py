@@ -18,8 +18,10 @@ if TYPE_CHECKING:
     from supabase import Client
 
 BUCKET_ANEXOS = "avaliapp-anexos"
+BUCKET_VISTORIAS = "avaliapp-vistorias"
 TABELA_AVALIACOES = "avaliacoes"
 TABELA_PERFIS = "perfis"
+TABELA_VISTORIAS = "vistorias"
 
 
 class SupaNaoConfigurado(RuntimeError):
