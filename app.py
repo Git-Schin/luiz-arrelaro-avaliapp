@@ -60,9 +60,9 @@ paginas = [
     st.Page("pages/2_Historico.py", title="Histórico (Avaliações)",
             icon=":material/history:"),
     st.Page("pages/4_Vistoria.py", title="Nova Vistoria",
-            icon=":material/home_search:"),
+            icon=":material/domain:"),
     st.Page("pages/5_Vistorias.py", title="Histórico (Vistorias)",
-            icon=":material/fact_check:"),
+            icon=":material/rule:"),
     st.Page("pages/3_Perfil.py", title="Meu Perfil",
             icon=":material/manage_accounts:"),
 ]
