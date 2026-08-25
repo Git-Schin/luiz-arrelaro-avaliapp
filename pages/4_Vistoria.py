@@ -324,48 +324,31 @@ def _render_passo_1():
 
 # ── Foto: upload unificado (câmera nativa no mobile, arquivo no desktop) ────────
 
-def _widget_foto(comodo: dict, item_idx: int, item: dict, mobile: bool):
-    """Mobile: abre câmera nativa via file input. Desktop: seleção de arquivo."""
+def _widget_foto(comodo: dict, item_idx: int, item: dict, mobile: bool = False):
+    """Uploader de foto sempre full-width. Chave dinâmica permite acumular múltiplas fotos."""
     cid = comodo["id"]
     fotos_salvas = [f for f in item.get("fotos", []) if f.get("bytes")]
     n_fotos = len(fotos_salvas)
 
-    if mobile:
-        # Chave muda a cada foto adicionada → widget reseta → permite nova captura
-        up = st.file_uploader(
-            "📷 Tirar foto",
-            type=["jpg", "jpeg", "png"],
-            accept_multiple_files=False,
-            key=f"foto_mob_{cid}_{item_idx}_{n_fotos}",
-            help="Toque para abrir a câmera. Pode adicionar várias fotos.",
-        )
-        if up is not None:
-            item.setdefault("fotos", []).append({"nome": up.name, "bytes": up.read()})
-            st.rerun()
-    else:
-        # Desktop: seleção múltipla — chave muda para acumular (append)
-        novos = st.file_uploader(
-            "📁 Adicionar foto(s)",
-            type=["jpg", "jpeg", "png"],
-            accept_multiple_files=True,
-            key=f"foto_desk_{cid}_{item_idx}_{n_fotos}",
-            help="Selecione uma ou mais fotos.",
-        )
-        if novos:
-            for f in novos:
-                item.setdefault("fotos", []).append({"nome": f.name, "bytes": f.read()})
-            st.rerun()
+    # Chave muda a cada foto adicionada → widget reseta → permite nova captura
+    up = st.file_uploader(
+        "📷 Foto",
+        type=["jpg", "jpeg", "png"],
+        accept_multiple_files=False,
+        key=f"foto_{cid}_{item_idx}_{n_fotos}",
+        label_visibility="collapsed",
+    )
+    if up is not None:
+        item.setdefault("fotos", []).append({"nome": up.name, "bytes": up.read()})
+        st.rerun()
 
-    # Galeria de todas as fotos acumuladas (mobile e desktop)
+    # Galeria das fotos já adicionadas
     if fotos_salvas:
         st.caption(f"📸 {n_fotos} foto(s)")
-        n_cols = 1 if mobile else min(n_fotos, 3)
-        cols_f = st.columns(n_cols)
         for fi, fb in enumerate(fotos_salvas):
             if fb.get("bytes"):
-                col = cols_f[fi % n_cols]
-                col.image(fb["bytes"], use_container_width=True)
-                if col.button("🗑️", key=f"del_f_{cid}_{item_idx}_{fi}", help="Remover foto"):
+                st.image(fb["bytes"], use_container_width=True)
+                if st.button("🗑️", key=f"del_f_{cid}_{item_idx}_{fi}", help="Remover foto"):
                     item["fotos"].pop(fi)
                     st.rerun()
 
@@ -477,25 +460,22 @@ def _render_item_mobile(comodo: dict, ci: int):
 
 def _render_item_desktop(comodo: dict, item_idx: int, item: dict, item_entrada: dict | None):
     with st.container(border=True):
-        col_form, col_foto = st.columns([2, 1])
-        with col_form:
-            st.markdown(f"**{item.get('nome', f'Item {item_idx + 1}')}**")
-            if item_entrada:
-                st.caption(f"Na entrada: **{item_entrada.get('estado', '—')}**")
-            opcoes_est = [""] + VT.ESTADOS
-            idx_est = opcoes_est.index(item["estado"]) if item.get("estado") in VT.ESTADOS else 0
-            item["estado"] = st.selectbox(
-                "Estado", opcoes_est, index=idx_est,
-                key=f"est_{comodo['id']}_{item_idx}",
-                label_visibility="collapsed",
-            )
-            item["obs"] = st.text_input(
-                "Observação", value=item.get("obs", ""),
-                placeholder="Detalhes relevantes...",
-                key=f"obs_{comodo['id']}_{item_idx}",
-            )
-        with col_foto:
-            _widget_foto(comodo, item_idx, item, mobile=False)
+        st.markdown(f"**{item.get('nome', f'Item {item_idx + 1}')}**")
+        if item_entrada:
+            st.caption(f"Na entrada: **{item_entrada.get('estado', '—')}**")
+        opcoes_est = [""] + VT.ESTADOS
+        idx_est = opcoes_est.index(item["estado"]) if item.get("estado") in VT.ESTADOS else 0
+        item["estado"] = st.selectbox(
+            "Estado", opcoes_est, index=idx_est,
+            key=f"est_{comodo['id']}_{item_idx}",
+            label_visibility="collapsed",
+        )
+        item["obs"] = st.text_input(
+            "Observação", value=item.get("obs", ""),
+            placeholder="Detalhes relevantes...",
+            key=f"obs_{comodo['id']}_{item_idx}",
+        )
+        _widget_foto(comodo, item_idx, item)
 
 
 # ── Detalhe de um cômodo (mobile ou desktop) ──────────────────────────────────
