@@ -24,14 +24,37 @@ from core import pdf_vistoria as PDFVIST
 from core.ui import detectar_mobile
 
 # ── Keys do session_state ─────────────────────────────────────────────────────
-_K_DADOS  = "vistoria"
-_K_ID     = "vistoria_id"
-_K_PASSO  = "vistoria_passo"
-_K_COMODO = "vistoria_comodo_idx"
-_K_ITEM   = "vistoria_item_idx"
-_K_RESET  = "_resetar_vistoria"
+_K_DADOS      = "vistoria"
+_K_ID         = "vistoria_id"
+_K_PASSO      = "vistoria_passo"
+_K_COMODO     = "vistoria_comodo_idx"
+_K_ITEM       = "vistoria_item_idx"
+_K_RESET      = "_resetar_vistoria"
+_K_ADICIONANDO = "vistoria_adicionando_comodo"
 
-_RESET_KEYS = [_K_DADOS, _K_ID, _K_PASSO, _K_COMODO, _K_ITEM, "vistoria_entrada_dados"]
+_RESET_KEYS = [_K_DADOS, _K_ID, _K_PASSO, _K_COMODO, _K_ITEM,
+               "vistoria_entrada_dados", _K_ADICIONANDO]
+
+# Opções rápidas de cômodo para o panel de inclusão
+_COMODOS_RAPIDOS = [
+    ("🛋️", "Sala de Estar"),
+    ("🍽️", "Sala de Jantar"),
+    ("🍳", "Cozinha"),
+    ("🧺", "Área de Serviço"),
+    ("🛏️", "Quarto 1"),
+    ("🛏️", "Quarto 2"),
+    ("🛏️", "Quarto 3"),
+    ("🛏️", "Suíte Master"),
+    ("🚿", "Banheiro Social"),
+    ("🚿", "Banheiro Suíte"),
+    ("🚗", "Garagem"),
+    ("🌿", "Varanda"),
+    ("🌳", "Área Externa"),
+    ("💼", "Escritório"),
+    ("🚪", "Hall de Entrada"),
+    ("🪟", "Corredor"),
+    ("📦", "Despensa"),
+]
 
 # ── Reset ─────────────────────────────────────────────────────────────────────
 if st.session_state.pop(_K_RESET, False):
@@ -511,141 +534,114 @@ def _render_detalhe_comodo(ci: int):
                 st.rerun()
 
 
-# ── Lista de cômodos ──────────────────────────────────────────────────────────
+# ── Panel de inclusão de cômodo ───────────────────────────────────────────────
 
-# ── Setup inicial: montar lista de cômodos antes de começar a vistoria ────────
-
-def _render_setup_comodos():
-    dados = _dados()
-    comodos = dados.setdefault("comodos", [])
-
-    st.subheader("Configure os cômodos do imóvel")
-    st.caption(
-        "Adapte a lista abaixo ao imóvel real — adicione, remova ou renomeie "
-        "antes de iniciar a vistoria. Você não poderá voltar a esta etapa depois."
-    )
-    st.divider()
-
-    for ci, comodo in enumerate(comodos):
-        with st.container(border=True):
-            c_icone, c_nome, c_del = st.columns([1, 5, 1])
-            novo_icone = c_icone.selectbox(
-                "", VT.ICONES_DISPONIVEIS,
-                index=VT.ICONES_DISPONIVEIS.index(comodo.get("icone", "🏠"))
-                      if comodo.get("icone") in VT.ICONES_DISPONIVEIS else 0,
-                key=f"setup_icone_{ci}",
-                label_visibility="collapsed",
-            )
-            comodo["icone"] = novo_icone
-            novo_nome = c_nome.text_input(
-                "", value=comodo.get("nome", ""),
-                key=f"setup_nome_{ci}",
-                label_visibility="collapsed",
-            )
-            if novo_nome.strip():
-                comodo["nome"] = novo_nome.strip()
-            if c_del.button("🗑️", key=f"setup_del_{ci}", help="Remover"):
-                comodos.pop(ci)
+def _render_panel_incluir_comodo():
+    comodos = _dados().setdefault("comodos", [])
+    with st.container(border=True):
+        st.markdown("**Escolha um cômodo:**")
+        n_cols = 2 if is_mobile else 3
+        cols = st.columns(n_cols)
+        for i, (icone, nome) in enumerate(_COMODOS_RAPIDOS):
+            if cols[i % n_cols].button(
+                f"{icone} {nome}", key=f"qr_{i}", use_container_width=True
+            ):
+                comodos.append(VT.novo_comodo(nome, icone))
+                st.session_state[_K_ADICIONANDO] = False
                 st.rerun()
 
-    st.divider()
-    with st.expander("➕ Adicionar cômodo"):
-        col_n, col_i = st.columns([4, 1])
-        nome_novo  = col_n.text_input("Nome", placeholder="Ex.: Quarto 2, Varanda...",
-                                       key="setup_novo_nome")
-        icone_novo = col_i.selectbox("", VT.ICONES_DISPONIVEIS,
-                                      key="setup_novo_icone",
-                                      label_visibility="collapsed")
-        if st.button("Adicionar", key="setup_btn_add") and nome_novo.strip():
-            comodos.append(VT.novo_comodo(nome_novo.strip(), icone_novo))
+        st.divider()
+        st.markdown("**Personalizado:**")
+        c_n, c_i, c_btn = st.columns([3, 1, 1])
+        nome_c = c_n.text_input("Nome", placeholder="Ex.: Varanda Gourmet",
+                                  key="inc_custom_nome", label_visibility="collapsed")
+        icone_c = c_i.selectbox("", VT.ICONES_DISPONIVEIS,
+                                  key="inc_custom_icone", label_visibility="collapsed")
+        if c_btn.button("Incluir", key="inc_custom_btn") and nome_c.strip():
+            comodos.append(VT.novo_comodo(nome_c.strip(), icone_c))
+            st.session_state[_K_ADICIONANDO] = False
             st.rerun()
 
-    st.divider()
-    if not comodos:
-        st.warning("Adicione pelo menos um cômodo para continuar.")
-    else:
-        if st.button(
-            f"✅ Confirmar lista ({len(comodos)} cômodo(s)) e iniciar vistoria",
-            type="primary", use_container_width=True,
-        ):
-            dados["comodos_confirmados"] = True
+        if st.button("✕ Fechar", key="inc_fechar", use_container_width=False):
+            st.session_state[_K_ADICIONANDO] = False
             st.rerun()
 
 
-# ── Lista de cômodos ──────────────────────────────────────────────────────────
+# ── Lista de cômodos (cards) ──────────────────────────────────────────────────
 
 def _render_lista_comodos():
-    dados = _dados()
-    comodos = dados.setdefault("comodos", [])
+    comodos = _dados().setdefault("comodos", [])
     conc, tot = _progresso_comodos()
 
-    st.markdown(f"**{conc}/{tot} cômodos vistoriados**")
-    if tot:
-        st.progress(conc / tot)
+    # Botão sempre visível no topo
+    if st.button("➕ Incluir cômodo", use_container_width=is_mobile):
+        st.session_state[_K_ADICIONANDO] = True
+        st.rerun()
 
-    if is_mobile:
-        st.caption("Toque em **Inspecionar** para vistoriar cômodo a cômodo.")
+    # Panel de seleção (aparece logo após o botão quando ativo)
+    if st.session_state.get(_K_ADICIONANDO):
+        _render_panel_incluir_comodo()
+
+    st.divider()
+
+    # Sem cômodos ainda
+    if not comodos:
+        st.info("Nenhum cômodo adicionado. Toque em **Incluir cômodo** para começar.")
     else:
-        st.caption("Clique em **Inspecionar** para abrir o cômodo.")
-    st.divider()
+        # Barra de progresso
+        if tot:
+            st.caption(f"{conc}/{tot} cômodos concluídos")
+            st.progress(conc / tot)
+            st.divider()
 
-    for ci, comodo in enumerate(comodos):
-        nome    = comodo.get("nome", f"Cômodo {ci + 1}")
-        icone   = comodo.get("icone", "🏠")
-        conc_c  = comodo.get("concluido", False)
-        badge   = "✅ Concluído" if conc_c else "⏳ Pendente"
-        cor     = "#10B981" if conc_c else "#F59E0B"
-        n_i     = len(comodo.get("itens") or [])
-        n_p     = sum(1 for it in (comodo.get("itens") or []) if it.get("estado"))
+        # Cards dos cômodos
+        for ci, comodo in enumerate(comodos):
+            nome   = comodo.get("nome", f"Cômodo {ci + 1}")
+            icone  = comodo.get("icone", "🏠")
+            conc_c = comodo.get("concluido", False)
+            badge  = "✅ Concluído" if conc_c else "⏳ Pendente"
+            cor    = "#10B981" if conc_c else "#F59E0B"
+            n_i    = len(comodo.get("itens") or [])
+            n_p    = sum(1 for it in (comodo.get("itens") or []) if it.get("estado"))
 
-        with st.container(border=True):
-            c_info, c_btn = st.columns([3, 1])
-            with c_info:
-                st.markdown(f"{icone} **{nome}**")
-                st.markdown(f"<span style='color:{cor};font-size:12px;'>{badge}</span>",
-                            unsafe_allow_html=True)
-                if n_i:
-                    st.caption(f"{n_p}/{n_i} itens com estado")
-            with c_btn:
-                lbl = "✏️ Revisar" if conc_c else "🔍 Inspecionar"
-                if st.button(lbl, key=f"ins_{ci}", use_container_width=True):
-                    st.session_state[_K_COMODO] = ci
-                    st.session_state[_K_ITEM] = 0  # começa do primeiro item no mobile
-                    st.rerun()
-                if conc_c:
-                    if st.button("↩️", key=f"unconcl_{ci}",
-                                 help="Desmarcar como concluído",
-                                 use_container_width=True):
-                        comodo["concluido"] = False
+            with st.container(border=True):
+                c_info, c_btn = st.columns([3, 1])
+                with c_info:
+                    st.markdown(f"### {icone} {nome}")
+                    st.markdown(
+                        f"<span style='color:{cor};font-size:13px;font-weight:600'>"
+                        f"{badge}</span>",
+                        unsafe_allow_html=True,
+                    )
+                    if n_i:
+                        st.caption(f"{n_p}/{n_i} itens avaliados")
+                with c_btn:
+                    lbl = "✏️ Revisar" if conc_c else "🔍 Inspecionar"
+                    if st.button(lbl, key=f"ins_{ci}", use_container_width=True):
+                        st.session_state[_K_COMODO] = ci
+                        st.session_state[_K_ITEM] = 0
                         st.rerun()
-                if st.button("🗑️", key=f"del_c_{ci}", help="Remover cômodo",
-                             use_container_width=True):
-                    comodos.pop(ci)
-                    st.rerun()
+                    if conc_c:
+                        if st.button("↩️", key=f"unconcl_{ci}",
+                                     help="Desmarcar como concluído",
+                                     use_container_width=True):
+                            comodo["concluido"] = False
+                            st.rerun()
+                    if st.button("🗑️", key=f"del_c_{ci}", help="Remover",
+                                 use_container_width=True):
+                        comodos.pop(ci)
+                        st.rerun()
 
+    # Navegação inferior
     st.divider()
-    with st.expander("➕ Adicionar cômodo"):
-        col_n, col_i = st.columns([3, 1])
-        nome_novo  = col_n.text_input("Nome", placeholder="Ex.: Quarto 2", key="novo_comodo_nome")
-        icone_novo = col_i.selectbox("Ícone", VT.ICONES_DISPONIVEIS, key="novo_comodo_icone")
-        if st.button("Adicionar cômodo", key="btn_add_comodo") and nome_novo.strip():
-            comodos.append(VT.novo_comodo(nome_novo.strip(), icone_novo))
-            st.rerun()
-
-    st.divider()
-    c_prev, c_edit, c_next = st.columns([2, 2, 3])
+    c_prev, c_next = st.columns(2)
     with c_prev:
         if st.button("← Identificação", use_container_width=True):
             _ir_para(1)
-    with c_edit:
-        if st.button("✏️ Editar lista", use_container_width=True,
-                     help="Voltar para adicionar ou remover cômodos"):
-            _dados()["comodos_confirmados"] = False
-            st.rerun()
     with c_next:
-        if conc < tot:
+        if tot == 0 or conc < tot:
             st.button(
-                f"Fechamento → ({tot - conc} pendente(s))",
+                "Fechamento →" if tot == 0 else f"Fechamento → ({tot - conc} pendente(s))",
                 use_container_width=True, disabled=True,
                 help="Conclua todos os cômodos antes de avançar.",
             )
@@ -656,16 +652,6 @@ def _render_lista_comodos():
 
 def _render_passo_2():
     st.subheader("Vistoria dos Cômodos")
-    dados = _dados()
-
-    # Vistorias carregadas do histórico (sem a chave) já têm cômodos configurados
-    if "comodos_confirmados" not in dados:
-        dados["comodos_confirmados"] = True
-
-    if not dados["comodos_confirmados"]:
-        _render_setup_comodos()
-        return
-
     ci = st.session_state.get(_K_COMODO)
     if ci is not None:
         _render_detalhe_comodo(ci)

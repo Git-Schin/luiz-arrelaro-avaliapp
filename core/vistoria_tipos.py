@@ -159,7 +159,6 @@ def dados_vistoria_vazio(perfil: dict | None = None) -> dict:
     return {
         "tipo": "entrada",
         "vistoria_entrada_id": None,
-        "comodos_confirmados": False,
         "identificacao": {
             "cep": "",
             "endereco": "",
@@ -174,7 +173,7 @@ def dados_vistoria_vazio(perfil: dict | None = None) -> dict:
             "data_vistoria": None,
             "vistoriador_nome": (perfil or {}).get("nome", ""),
         },
-        "comodos": comodos_iniciais(),
+        "comodos": [],
         "fechamento": {
             "chaves_quantidade": 2,
             "medidor_agua": "",
