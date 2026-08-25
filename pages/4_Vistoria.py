@@ -250,83 +250,52 @@ def _render_passo_1():
 # PASSO 2 — CÔMODOS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# ── Foto: widget unificado (câmera + galeria) ─────────────────────────────────
+# ── Foto: upload unificado (câmera nativa no mobile, arquivo no desktop) ────────
 
 def _widget_foto(comodo: dict, item_idx: int, item: dict, mobile: bool):
-    """Renderiza a captura de foto: câmera (mobile) ou arquivo (desktop)."""
+    """Mobile: abre câmera nativa via file input. Desktop: seleção de arquivo."""
     cid = comodo["id"]
     fotos_salvas = [f for f in item.get("fotos", []) if f.get("bytes")]
+    n_fotos = len(fotos_salvas)
 
     if mobile:
-        # ── Câmera como primário ──────────────────────────────────────────────
-        foto_cam = st.camera_input(
-            "📷 Adicionar foto",
-            key=f"cam_{cid}_{item_idx}",
-            help="Capture uma foto. Pode tirar várias.",
+        # Chave muda a cada foto adicionada → widget reseta → permite nova captura
+        up = st.file_uploader(
+            "📷 Tirar foto",
+            type=["jpg", "jpeg", "png"],
+            accept_multiple_files=False,
+            key=f"foto_mob_{cid}_{item_idx}_{n_fotos}",
+            help="Toque para abrir a câmera. Pode adicionar várias fotos.",
         )
-        if foto_cam is not None:
-            n = len(fotos_salvas) + 1
-            item.setdefault("fotos", []).append({
-                "nome": f"foto_{item['nome'].replace('/', '_')}_{n}.jpg",
-                "bytes": foto_cam.getvalue(),
-            })
+        if up is not None:
+            item.setdefault("fotos", []).append({"nome": up.name, "bytes": up.read()})
             st.rerun()
-
-        # Galeria como alternativa
-        with st.expander("📁 ou escolher da galeria"):
-            up = st.file_uploader(
-                "Selecionar arquivo",
-                type=["jpg", "jpeg", "png"],
-                key=f"up_{cid}_{item_idx}",
-                label_visibility="collapsed",
-            )
-            if up:
-                item.setdefault("fotos", []).append({"nome": up.name, "bytes": up.read()})
-                st.rerun()
-
-        # Preview de todas as fotos salvas
-        if fotos_salvas:
-            st.caption(f"📸 {len(fotos_salvas)} foto(s)")
-            for fi, fb in enumerate(fotos_salvas):
-                if fb.get("bytes"):
-                    c_img, c_del = st.columns([5, 1])
-                    c_img.image(fb["bytes"], use_container_width=True)
-                    if c_del.button("🗑️", key=f"del_f_{cid}_{item_idx}_{fi}",
-                                    help="Remover foto"):
-                        item["fotos"].pop(fi)
-                        st.rerun()
-
     else:
-        # ── Arquivo como primário (desktop) ───────────────────────────────────
+        # Desktop: seleção múltipla — chave muda para acumular (append)
         novos = st.file_uploader(
-            "📎 Fotos",
+            "📁 Adicionar foto(s)",
             type=["jpg", "jpeg", "png"],
             accept_multiple_files=True,
-            key=f"up_{cid}_{item_idx}",
+            key=f"foto_desk_{cid}_{item_idx}_{n_fotos}",
+            help="Selecione uma ou mais fotos.",
         )
         if novos:
-            item["fotos"] = [{"nome": f.name, "bytes": f.read()} for f in novos]
-            fotos_salvas = item["fotos"]
+            for f in novos:
+                item.setdefault("fotos", []).append({"nome": f.name, "bytes": f.read()})
+            st.rerun()
 
-        # Preview
-        if fotos_salvas:
-            cols_f = st.columns(min(len(fotos_salvas), 3))
-            for col, fb in zip(cols_f, fotos_salvas[:3]):
+    # Galeria de todas as fotos acumuladas (mobile e desktop)
+    if fotos_salvas:
+        st.caption(f"📸 {n_fotos} foto(s)")
+        n_cols = 1 if mobile else min(n_fotos, 3)
+        cols_f = st.columns(n_cols)
+        for fi, fb in enumerate(fotos_salvas):
+            if fb.get("bytes"):
+                col = cols_f[fi % n_cols]
                 col.image(fb["bytes"], use_container_width=True)
-            if len(fotos_salvas) > 3:
-                st.caption(f"+{len(fotos_salvas) - 3} foto(s)")
-            if st.button("🗑️ Limpar fotos", key=f"del_f_{cid}_{item_idx}"):
-                item["fotos"] = []
-                st.rerun()
-
-        # Câmera como opção adicional no desktop
-        with st.expander("📷 Usar câmera"):
-            foto_cam = st.camera_input("", key=f"cam_{cid}_{item_idx}",
-                                       label_visibility="collapsed")
-            if foto_cam is not None:
-                item["fotos"] = [{"nome": f"foto_{item['nome'].replace('/', '_')}.jpg",
-                                   "bytes": foto_cam.getvalue()}]
-                st.rerun()
+                if col.button("🗑️", key=f"del_f_{cid}_{item_idx}_{fi}", help="Remover foto"):
+                    item["fotos"].pop(fi)
+                    st.rerun()
 
 
 # ── Renderização de um item — MOBILE (um item por tela) ──────────────────────
@@ -544,6 +513,67 @@ def _render_detalhe_comodo(ci: int):
 
 # ── Lista de cômodos ──────────────────────────────────────────────────────────
 
+# ── Setup inicial: montar lista de cômodos antes de começar a vistoria ────────
+
+def _render_setup_comodos():
+    dados = _dados()
+    comodos = dados.setdefault("comodos", [])
+
+    st.subheader("Configure os cômodos do imóvel")
+    st.caption(
+        "Adapte a lista abaixo ao imóvel real — adicione, remova ou renomeie "
+        "antes de iniciar a vistoria. Você não poderá voltar a esta etapa depois."
+    )
+    st.divider()
+
+    for ci, comodo in enumerate(comodos):
+        with st.container(border=True):
+            c_icone, c_nome, c_del = st.columns([1, 5, 1])
+            novo_icone = c_icone.selectbox(
+                "", VT.ICONES_DISPONIVEIS,
+                index=VT.ICONES_DISPONIVEIS.index(comodo.get("icone", "🏠"))
+                      if comodo.get("icone") in VT.ICONES_DISPONIVEIS else 0,
+                key=f"setup_icone_{ci}",
+                label_visibility="collapsed",
+            )
+            comodo["icone"] = novo_icone
+            novo_nome = c_nome.text_input(
+                "", value=comodo.get("nome", ""),
+                key=f"setup_nome_{ci}",
+                label_visibility="collapsed",
+            )
+            if novo_nome.strip():
+                comodo["nome"] = novo_nome.strip()
+            if c_del.button("🗑️", key=f"setup_del_{ci}", help="Remover"):
+                comodos.pop(ci)
+                st.rerun()
+
+    st.divider()
+    with st.expander("➕ Adicionar cômodo"):
+        col_n, col_i = st.columns([4, 1])
+        nome_novo  = col_n.text_input("Nome", placeholder="Ex.: Quarto 2, Varanda...",
+                                       key="setup_novo_nome")
+        icone_novo = col_i.selectbox("", VT.ICONES_DISPONIVEIS,
+                                      key="setup_novo_icone",
+                                      label_visibility="collapsed")
+        if st.button("Adicionar", key="setup_btn_add") and nome_novo.strip():
+            comodos.append(VT.novo_comodo(nome_novo.strip(), icone_novo))
+            st.rerun()
+
+    st.divider()
+    if not comodos:
+        st.warning("Adicione pelo menos um cômodo para continuar.")
+    else:
+        if st.button(
+            f"✅ Confirmar lista ({len(comodos)} cômodo(s)) e iniciar vistoria",
+            type="primary", use_container_width=True,
+        ):
+            dados["comodos_confirmados"] = True
+            st.rerun()
+
+
+# ── Lista de cômodos ──────────────────────────────────────────────────────────
+
 def _render_lista_comodos():
     dados = _dados()
     comodos = dados.setdefault("comodos", [])
@@ -603,10 +633,15 @@ def _render_lista_comodos():
             st.rerun()
 
     st.divider()
-    c_prev, c_next = st.columns(2)
+    c_prev, c_edit, c_next = st.columns([2, 2, 3])
     with c_prev:
         if st.button("← Identificação", use_container_width=True):
             _ir_para(1)
+    with c_edit:
+        if st.button("✏️ Editar lista", use_container_width=True,
+                     help="Voltar para adicionar ou remover cômodos"):
+            _dados()["comodos_confirmados"] = False
+            st.rerun()
     with c_next:
         if conc < tot:
             st.button(
@@ -621,6 +656,16 @@ def _render_lista_comodos():
 
 def _render_passo_2():
     st.subheader("Vistoria dos Cômodos")
+    dados = _dados()
+
+    # Vistorias carregadas do histórico (sem a chave) já têm cômodos configurados
+    if "comodos_confirmados" not in dados:
+        dados["comodos_confirmados"] = True
+
+    if not dados["comodos_confirmados"]:
+        _render_setup_comodos()
+        return
+
     ci = st.session_state.get(_K_COMODO)
     if ci is not None:
         _render_detalhe_comodo(ci)

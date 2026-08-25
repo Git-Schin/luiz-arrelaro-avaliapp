@@ -159,6 +159,7 @@ def dados_vistoria_vazio(perfil: dict | None = None) -> dict:
     return {
         "tipo": "entrada",
         "vistoria_entrada_id": None,
+        "comodos_confirmados": False,
         "identificacao": {
             "cep": "",
             "endereco": "",
