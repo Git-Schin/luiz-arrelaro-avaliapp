@@ -325,18 +325,30 @@ def _render_passo_1():
 # ── Foto: upload unificado (câmera nativa no mobile, arquivo no desktop) ────────
 
 def _widget_foto(comodo: dict, item_idx: int, item: dict, mobile: bool = False):
-    """Uploader de foto sempre full-width. Chave dinâmica permite acumular múltiplas fotos."""
+    """Captura de foto: câmera nativa + upload de arquivo como alternativa."""
     cid = comodo["id"]
     fotos_salvas = [f for f in item.get("fotos", []) if f.get("bytes")]
     n_fotos = len(fotos_salvas)
 
-    # Chave muda a cada foto adicionada → widget reseta → permite nova captura
+    st.caption("📷 Foto do item")
+
+    # Opção 1: câmera — botão claro e óbvio em qualquer dispositivo
+    cam = st.camera_input(
+        "Tirar foto",
+        key=f"cam_{cid}_{item_idx}_{n_fotos}",
+        label_visibility="collapsed",
+    )
+    if cam is not None:
+        item.setdefault("fotos", []).append({"nome": f"foto_{n_fotos + 1}.jpg", "bytes": cam.read()})
+        st.rerun()
+
+    # Opção 2: arquivo da galeria
     up = st.file_uploader(
-        "📷 Foto",
+        "Ou escolher da galeria",
         type=["jpg", "jpeg", "png"],
         accept_multiple_files=False,
-        key=f"foto_{cid}_{item_idx}_{n_fotos}",
-        label_visibility="collapsed",
+        key=f"gal_{cid}_{item_idx}_{n_fotos}",
+        label_visibility="visible",
     )
     if up is not None:
         item.setdefault("fotos", []).append({"nome": up.name, "bytes": up.read()})
@@ -344,7 +356,7 @@ def _widget_foto(comodo: dict, item_idx: int, item: dict, mobile: bool = False):
 
     # Galeria das fotos já adicionadas
     if fotos_salvas:
-        st.caption(f"📸 {n_fotos} foto(s)")
+        st.caption(f"📸 {n_fotos} foto(s) salva(s)")
         for fi, fb in enumerate(fotos_salvas):
             if fb.get("bytes"):
                 st.image(fb["bytes"], use_container_width=True)
@@ -715,11 +727,18 @@ def _render_passo_3():
             )
             fotos_med = fech.setdefault(campo_foto, [])
             n_f_med = len([f for f in fotos_med if f.get("bytes") or f.get("caminho")])
-            up_med = st.file_uploader(
-                "Foto do medidor", type=["jpg", "jpeg", "png"],
-                accept_multiple_files=False,
-                key=f"{key_val}_foto_{n_f_med}",
+            cam_med = st.camera_input(
+                "Foto", key=f"{key_val}_cam_{n_f_med}",
                 label_visibility="collapsed",
+            )
+            if cam_med is not None:
+                fotos_med.append({"nome": f"med_{key_val}_{n_f_med+1}.jpg", "bytes": cam_med.read()})
+                st.rerun()
+            up_med = st.file_uploader(
+                "Ou galeria", type=["jpg", "jpeg", "png"],
+                accept_multiple_files=False,
+                key=f"{key_val}_gal_{n_f_med}",
+                label_visibility="visible",
             )
             if up_med is not None:
                 fotos_med.append({"nome": up_med.name, "bytes": up_med.read()})
