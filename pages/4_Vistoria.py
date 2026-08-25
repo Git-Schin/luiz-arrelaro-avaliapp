@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import streamlit as st
 import streamlit.components.v1 as components
+import base64 as _b64
 from datetime import date
 
 from config import identidade as ID
@@ -323,80 +324,65 @@ def _render_passo_1():
 # PASSO 2 — CÔMODOS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# ── JS: abre câmera nativa ao clicar em file inputs (mobile) ────────────────
+# ── Botão de câmera nativa (iframe isolado — não toca no DOM do React) ────────
 
-def _injetar_capture():
-    """Câmera nativa + visual de botão para todos os file_uploaders de foto."""
-    components.html(
-        """<script>
-        (function(){
-            var d = window.parent.document;
-
-            if (!d.getElementById('avaliapp-foto-style')) {
-                var s = d.createElement('style');
-                s.id = 'avaliapp-foto-style';
-                s.textContent = `
-                    [data-testid="stFileUploaderDropzone"] {
-                        background: #10B981 !important;
-                        border: none !important;
-                        border-radius: 10px !important;
-                        min-height: unset !important;
-                        padding: 2px !important;
-                        cursor: pointer !important;
-                    }
-                    [data-testid="stFileUploaderDropzoneInstructions"] {
-                        display: none !important;
-                    }
-                    [data-testid="stFileUploaderDropzone"] button {
-                        background: transparent !important;
-                        color: white !important;
-                        font-size: 17px !important;
-                        font-weight: 700 !important;
-                        width: 100% !important;
-                        border: none !important;
-                        padding: 16px !important;
-                        cursor: pointer !important;
-                        letter-spacing: 0.3px !important;
-                    }
-                    [data-testid="stFileUploaderDropzone"] button:hover {
-                        background: rgba(255,255,255,0.15) !important;
-                    }
-                `;
-                d.head.appendChild(s);
-            }
-
-            function patch(){
-                d.querySelectorAll('input[type="file"]').forEach(function(el){
-                    el.setAttribute('capture', 'environment');
-                });
-                d.querySelectorAll('[data-testid="stFileUploaderDropzone"] button').forEach(function(btn){
-                    if (btn.textContent.trim() !== '📷 Tirar Foto') {
-                        btn.textContent = '📷 Tirar Foto';
-                    }
-                });
-            }
-            patch();
-            new MutationObserver(patch).observe(d.body, {childList:true, subtree:true});
-        })();
-        </script>""",
-        height=0,
+def _camera_button(unique_key: str) -> bytes | None:
+    """Botão verde 'Tirar Foto' em iframe próprio. Retorna bytes da foto ou None."""
+    _ck = f"_cambtn_{unique_key}"
+    data = components.html(
+        """
+        <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        button{background:#10B981;color:#fff;font-size:17px;font-weight:700;
+               border:none;border-radius:10px;padding:16px;width:100%;
+               cursor:pointer;font-family:sans-serif;letter-spacing:.3px}
+        button:hover{background:#059669}
+        button:active{background:#047857}
+        </style>
+        <input id="f" type="file" accept="image/*" capture="environment" style="display:none">
+        <button onclick="document.getElementById('f').click()">📷 Tirar Foto</button>
+        <script>
+        document.getElementById('f').addEventListener('change',function(e){
+            var fl=e.target.files[0]; if(!fl) return;
+            var rd=new FileReader();
+            rd.onload=function(ev){Streamlit.setComponentValue(ev.target.result);};
+            rd.readAsDataURL(fl);
+        });
+        Streamlit.setFrameHeight(60);
+        </script>
+        """,
+        height=60,
     )
+    if data and isinstance(data, str) and ',' in data:
+        if data != st.session_state.get(_ck):
+            st.session_state[_ck] = data
+            try:
+                return _b64.b64decode(data.split(',', 1)[1])
+            except Exception:
+                pass
+    return None
 
 
 # ── Widget de foto ────────────────────────────────────────────────────────────
 
 def _widget_foto(comodo: dict, item_idx: int, item: dict):
-    """Botão de foto: abre câmera nativa no mobile, galeria no desktop."""
+    """Câmera nativa (botão verde) + opção de galeria (file_uploader)."""
     cid = comodo["id"]
     fotos_salvas = [f for f in item.get("fotos", []) if f.get("bytes")]
     n_fotos = len(fotos_salvas)
 
+    # Câmera nativa — iframe isolado
+    foto_bytes = _camera_button(f"{cid}_{item_idx}")
+    if foto_bytes:
+        item.setdefault("fotos", []).append({"nome": f"foto_{n_fotos+1}.jpg", "bytes": foto_bytes})
+        st.rerun()
+
+    # Galeria — file_uploader padrão
     up = st.file_uploader(
-        "foto",
+        "🖼️ Escolher da galeria",
         type=["jpg", "jpeg", "png"],
         accept_multiple_files=False,
-        key=f"foto_{cid}_{item_idx}_{n_fotos}",
-        label_visibility="collapsed",
+        key=f"gal_{cid}_{item_idx}_{n_fotos}",
     )
     if up is not None:
         item.setdefault("fotos", []).append({"nome": up.name, "bytes": up.read()})
@@ -729,7 +715,6 @@ def _render_lista_comodos():
 
 
 def _render_passo_2():
-    _injetar_capture()
     st.subheader("Vistoria dos Cômodos")
     ci = st.session_state.get(_K_COMODO)
     if ci is not None:
@@ -750,7 +735,6 @@ _MEDIDORES_DEF = [
 
 
 def _render_passo_3():
-    _injetar_capture()
     dados = _dados()
     fech  = dados.setdefault("fechamento", {})
 
@@ -776,12 +760,15 @@ def _render_passo_3():
             )
             fotos_med = fech.setdefault(campo_foto, [])
             n_f_med = len([f for f in fotos_med if f.get("bytes") or f.get("caminho")])
+            foto_bytes_med = _camera_button(f"med_{campo_foto}")
+            if foto_bytes_med:
+                fotos_med.append({"nome": f"med_{campo_foto}_{n_f_med+1}.jpg", "bytes": foto_bytes_med})
+                st.rerun()
             up_med = st.file_uploader(
-                "foto_med",
+                "🖼️ Galeria",
                 type=["jpg", "jpeg", "png"],
                 accept_multiple_files=False,
-                key=f"{key_val}_foto_{n_f_med}",
-                label_visibility="collapsed",
+                key=f"{key_val}_gal_{n_f_med}",
             )
             if up_med is not None:
                 fotos_med.append({"nome": up_med.name, "bytes": up_med.read()})
