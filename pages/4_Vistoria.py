@@ -56,6 +56,56 @@ _COMODOS_RAPIDOS = [
     ("📦", "Despensa"),
 ]
 
+# ── Callbacks on_click (evitam duplo clique) ─────────────────────────────────
+
+def _cb_ir_para(passo: int):
+    st.session_state[_K_PASSO] = passo
+    st.session_state[_K_COMODO] = None
+    st.session_state[_K_ITEM] = None
+
+
+def _cb_abrir_comodo(ci: int):
+    st.session_state[_K_COMODO] = ci
+    st.session_state[_K_ITEM] = 0
+
+
+def _cb_voltar_lista():
+    st.session_state[_K_COMODO] = None
+    st.session_state[_K_ITEM] = None
+
+
+def _cb_set_item(ii: int):
+    st.session_state[_K_ITEM] = ii
+
+
+def _cb_concluir_comodo(ci: int):
+    comodos = st.session_state.get(_K_DADOS, {}).get("comodos") or []
+    if ci < len(comodos):
+        comodos[ci]["concluido"] = True
+    st.session_state[_K_COMODO] = None
+    st.session_state[_K_ITEM] = None
+
+
+def _cb_desmarcar_comodo(ci: int):
+    comodos = st.session_state.get(_K_DADOS, {}).get("comodos") or []
+    if ci < len(comodos):
+        comodos[ci]["concluido"] = False
+
+
+def _cb_remover_comodo(ci: int):
+    comodos = st.session_state.get(_K_DADOS, {}).get("comodos") or []
+    if ci < len(comodos):
+        comodos.pop(ci)
+
+
+def _cb_toggle_adicionando():
+    st.session_state[_K_ADICIONANDO] = True
+
+
+def _cb_fechar_adicionando():
+    st.session_state[_K_ADICIONANDO] = False
+
+
 # ── Reset ─────────────────────────────────────────────────────────────────────
 if st.session_state.pop(_K_RESET, False):
     for k in _RESET_KEYS:
@@ -89,7 +139,6 @@ def _ir_para(passo: int):
     st.session_state[_K_PASSO] = passo
     st.session_state[_K_COMODO] = None
     st.session_state[_K_ITEM] = None
-    st.rerun()
 
 
 def _salvar_rascunho() -> int:
@@ -142,8 +191,8 @@ for i, (col, label) in enumerate(zip(cols_step, passos_labels), start=1):
             st.button(label, key=f"step_{i}", disabled=True,
                       type="primary", use_container_width=True)
         else:
-            if st.button(label, key=f"step_{i}", use_container_width=True):
-                _ir_para(i)
+            st.button(label, key=f"step_{i}", use_container_width=True,
+                      on_click=_cb_ir_para, args=(i,))
 
 st.divider()
 
@@ -265,8 +314,8 @@ def _render_passo_1():
                                                 value=ident.get("vistoriador_nome", ""), key="v_vist")
 
     st.divider()
-    if st.button("Próximo: Cômodos →", type="primary", use_container_width=is_mobile):
-        _ir_para(2)
+    st.button("Próximo: Cômodos →", type="primary", use_container_width=is_mobile,
+              on_click=_cb_ir_para, args=(2,))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -390,27 +439,19 @@ def _render_item_mobile(comodo: dict, ci: int):
 
     with c_prev:
         if ii > 0:
-            if st.button("← Anterior", use_container_width=True):
-                st.session_state[_K_ITEM] = ii - 1
-                st.rerun()
+            st.button("← Anterior", use_container_width=True,
+                      on_click=_cb_set_item, args=(ii - 1,))
         else:
-            if st.button("← Lista", use_container_width=True):
-                st.session_state[_K_COMODO] = None
-                st.session_state[_K_ITEM] = None
-                st.rerun()
+            st.button("← Lista", use_container_width=True,
+                      on_click=_cb_voltar_lista)
 
     with c_next:
         if ii < n_itens - 1:
-            if st.button("Próximo item →", type="primary", use_container_width=True):
-                st.session_state[_K_ITEM] = ii + 1
-                st.rerun()
+            st.button("Próximo item →", type="primary", use_container_width=True,
+                      on_click=_cb_set_item, args=(ii + 1,))
         else:
-            # Último item — opção de concluir
-            if st.button("✅ Concluir cômodo", type="primary", use_container_width=True):
-                comodo["concluido"] = True
-                st.session_state[_K_COMODO] = None
-                st.session_state[_K_ITEM] = None
-                st.rerun()
+            st.button("✅ Concluir cômodo", type="primary", use_container_width=True,
+                      on_click=_cb_concluir_comodo, args=(ci,))
 
     # Obs geral do cômodo (só no último item, colapsada)
     if ii == n_itens - 1:
@@ -486,9 +527,7 @@ def _render_detalhe_comodo(ci: int):
 
         c_back, c_title = st.columns([1, 4])
         with c_back:
-            if st.button("← Lista", use_container_width=True):
-                st.session_state[_K_COMODO] = None
-                st.rerun()
+            st.button("← Lista", use_container_width=True, on_click=_cb_voltar_lista)
         with c_title:
             comodo["nome"] = st.text_input("Nome do cômodo",
                                             value=comodo.get("nome", ""),
@@ -524,14 +563,11 @@ def _render_detalhe_comodo(ci: int):
         st.divider()
         c_concluir, c_voltar = st.columns(2)
         with c_concluir:
-            if st.button("✅ Marcar como concluído", type="primary", use_container_width=True):
-                comodo["concluido"] = True
-                st.session_state[_K_COMODO] = None
-                st.rerun()
+            st.button("✅ Marcar como concluído", type="primary", use_container_width=True,
+                      on_click=_cb_concluir_comodo, args=(ci,))
         with c_voltar:
-            if st.button("← Salvar e voltar", use_container_width=True):
-                st.session_state[_K_COMODO] = None
-                st.rerun()
+            st.button("← Salvar e voltar", use_container_width=True,
+                      on_click=_cb_voltar_lista)
 
 
 # ── Panel de inclusão de cômodo ───────────────────────────────────────────────
@@ -543,28 +579,37 @@ def _render_panel_incluir_comodo():
         n_cols = 2 if is_mobile else 3
         cols = st.columns(n_cols)
         for i, (icone, nome) in enumerate(_COMODOS_RAPIDOS):
-            if cols[i % n_cols].button(
-                f"{icone} {nome}", key=f"qr_{i}", use_container_width=True
-            ):
-                comodos.append(VT.novo_comodo(nome, icone))
+            def _add_comodo(icone=icone, nome=nome):
+                st.session_state[_K_DADOS].setdefault("comodos", []).append(
+                    VT.novo_comodo(nome, icone)
+                )
                 st.session_state[_K_ADICIONANDO] = False
-                st.rerun()
+            cols[i % n_cols].button(
+                f"{icone} {nome}", key=f"qr_{i}", use_container_width=True,
+                on_click=_add_comodo
+            )
 
         st.divider()
         st.markdown("**Personalizado:**")
         c_n, c_i, c_btn = st.columns([3, 1, 1])
-        nome_c = c_n.text_input("Nome", placeholder="Ex.: Varanda Gourmet",
-                                  key="inc_custom_nome", label_visibility="collapsed")
-        icone_c = c_i.selectbox("", VT.ICONES_DISPONIVEIS,
-                                  key="inc_custom_icone", label_visibility="collapsed")
-        if c_btn.button("Incluir", key="inc_custom_btn") and nome_c.strip():
-            comodos.append(VT.novo_comodo(nome_c.strip(), icone_c))
-            st.session_state[_K_ADICIONANDO] = False
-            st.rerun()
+        c_n.text_input("Nome", placeholder="Ex.: Varanda Gourmet",
+                        key="inc_custom_nome", label_visibility="collapsed")
+        c_i.selectbox("", VT.ICONES_DISPONIVEIS,
+                       key="inc_custom_icone", label_visibility="collapsed")
 
-        if st.button("✕ Fechar", key="inc_fechar", use_container_width=False):
-            st.session_state[_K_ADICIONANDO] = False
-            st.rerun()
+        def _add_comodo_custom():
+            nome = st.session_state.get("inc_custom_nome", "").strip()
+            icone = st.session_state.get("inc_custom_icone", VT.ICONES_DISPONIVEIS[0])
+            if nome:
+                st.session_state[_K_DADOS].setdefault("comodos", []).append(
+                    VT.novo_comodo(nome, icone)
+                )
+                st.session_state[_K_ADICIONANDO] = False
+
+        c_btn.button("Incluir", key="inc_custom_btn", on_click=_add_comodo_custom)
+
+        st.button("✕ Fechar", key="inc_fechar", use_container_width=False,
+                  on_click=_cb_fechar_adicionando)
 
 
 # ── Lista de cômodos (cards) ──────────────────────────────────────────────────
@@ -573,10 +618,8 @@ def _render_lista_comodos():
     comodos = _dados().setdefault("comodos", [])
     conc, tot = _progresso_comodos()
 
-    # Botão sempre visível no topo
-    if st.button("➕ Incluir cômodo", use_container_width=is_mobile):
-        st.session_state[_K_ADICIONANDO] = True
-        st.rerun()
+    st.button("➕ Incluir cômodo", use_container_width=is_mobile,
+              on_click=_cb_toggle_adicionando)
 
     # Panel de seleção (aparece logo após o botão quando ativo)
     if st.session_state.get(_K_ADICIONANDO):
@@ -617,27 +660,23 @@ def _render_lista_comodos():
                         st.caption(f"{n_p}/{n_i} itens avaliados")
                 with c_btn:
                     lbl = "✏️ Revisar" if conc_c else "🔍 Inspecionar"
-                    if st.button(lbl, key=f"ins_{ci}", use_container_width=True):
-                        st.session_state[_K_COMODO] = ci
-                        st.session_state[_K_ITEM] = 0
-                        st.rerun()
+                    st.button(lbl, key=f"ins_{ci}", use_container_width=True,
+                              on_click=_cb_abrir_comodo, args=(ci,))
                     if conc_c:
-                        if st.button("↩️", key=f"unconcl_{ci}",
-                                     help="Desmarcar como concluído",
-                                     use_container_width=True):
-                            comodo["concluido"] = False
-                            st.rerun()
-                    if st.button("🗑️", key=f"del_c_{ci}", help="Remover",
-                                 use_container_width=True):
-                        comodos.pop(ci)
-                        st.rerun()
+                        st.button("↩️", key=f"unconcl_{ci}",
+                                  help="Desmarcar como concluído",
+                                  use_container_width=True,
+                                  on_click=_cb_desmarcar_comodo, args=(ci,))
+                    st.button("🗑️", key=f"del_c_{ci}", help="Remover",
+                              use_container_width=True,
+                              on_click=_cb_remover_comodo, args=(ci,))
 
     # Navegação inferior
     st.divider()
     c_prev, c_next = st.columns(2)
     with c_prev:
-        if st.button("← Identificação", use_container_width=True):
-            _ir_para(1)
+        st.button("← Identificação", use_container_width=True,
+                  on_click=_cb_ir_para, args=(1,))
     with c_next:
         if tot == 0 or conc < tot:
             st.button(
@@ -646,8 +685,8 @@ def _render_lista_comodos():
                 help="Conclua todos os cômodos antes de avançar.",
             )
         else:
-            if st.button("Próximo: Fechamento →", type="primary", use_container_width=True):
-                _ir_para(3)
+            st.button("Próximo: Fechamento →", type="primary", use_container_width=True,
+                      on_click=_cb_ir_para, args=(3,))
 
 
 def _render_passo_2():
@@ -663,21 +702,57 @@ def _render_passo_2():
 # PASSO 3 — FECHAMENTO
 # ═══════════════════════════════════════════════════════════════════════════════
 
+_MEDIDORES_DEF = [
+    ("medidor_agua", "fotos_agua", "💧 Água",  "v_agua"),
+    ("medidor_luz",  "fotos_luz",  "⚡ Luz",   "v_luz"),
+    ("medidor_gas",  "fotos_gas",  "🔥 Gás",   "v_gas"),
+]
+
+
 def _render_passo_3():
     dados = _dados()
     fech  = dados.setdefault("fechamento", {})
 
     st.subheader("Fechamento e Laudo")
-    st.markdown("**Chaves e medidores**")
-
-    c1, c2, c3, c4 = st.columns(4)
-    fech["chaves_quantidade"] = c1.number_input(
+    st.markdown("**Chaves entregues**")
+    fech["chaves_quantidade"] = st.number_input(
         "Chaves", min_value=0, max_value=20,
         value=int(fech.get("chaves_quantidade") or 2), key="v_chaves",
+        label_visibility="collapsed",
     )
-    fech["medidor_agua"] = c2.text_input("Água",  value=fech.get("medidor_agua", ""), key="v_agua")
-    fech["medidor_luz"]  = c3.text_input("Luz",   value=fech.get("medidor_luz", ""),  key="v_luz")
-    fech["medidor_gas"]  = c4.text_input("Gás",   value=fech.get("medidor_gas", ""),  key="v_gas")
+
+    st.divider()
+    st.markdown("**Medidores**")
+    n_cols_med = 1 if is_mobile else 3
+    med_cols = st.columns(n_cols_med)
+    for col_i, (campo_val, campo_foto, label, key_val) in enumerate(_MEDIDORES_DEF):
+        with med_cols[col_i % n_cols_med]:
+            st.markdown(f"**{label}**")
+            fech[campo_val] = st.text_input(
+                "Leitura", value=fech.get(campo_val, ""),
+                key=key_val, label_visibility="collapsed",
+                placeholder="Ex.: 1234,5",
+            )
+            fotos_med = fech.setdefault(campo_foto, [])
+            n_f_med = len([f for f in fotos_med if f.get("bytes") or f.get("caminho")])
+            up_med = st.file_uploader(
+                "Foto do medidor", type=["jpg", "jpeg", "png"],
+                accept_multiple_files=False,
+                key=f"{key_val}_foto_{n_f_med}",
+                label_visibility="collapsed",
+            )
+            if up_med is not None:
+                fotos_med.append({"nome": up_med.name, "bytes": up_med.read()})
+                st.rerun()
+            if n_f_med:
+                st.caption(f"📸 {n_f_med} foto(s)")
+                first_med = next((f for f in fotos_med if f.get("bytes")), None)
+                if first_med:
+                    st.image(first_med["bytes"], use_container_width=True)
+                for fi_m, _ in enumerate(fotos_med):
+                    if st.button("🗑️", key=f"del_{campo_foto}_{fi_m}", help="Remover foto"):
+                        fotos_med.pop(fi_m)
+                        st.rerun()
 
     st.divider()
     fech["obs_gerais"] = st.text_area(
@@ -710,58 +785,69 @@ def _render_passo_3():
 
     _PDF_CACHE = "vistoria_pdf_cache"
 
-    col_salvar, col_pdf = st.columns(2)
-    with col_salvar:
-        if st.button("💾 Salvar e finalizar", type="primary", use_container_width=True):
+    # ── PDF download — sempre visível ────────────────────────────────────────
+    pdf_bytes = st.session_state.get(_PDF_CACHE)
+    if pdf_bytes is None:
+        try:
+            pdf_bytes = PDFVIST.gerar_laudo(dados, avaliador=_AVALIADOR,
+                                             dados_entrada=dados_entrada)
+            st.session_state[_PDF_CACHE] = pdf_bytes
+        except Exception as e:
+            st.error(f"Erro ao gerar PDF: {e}")
+    if pdf_bytes:
+        ident = dados.get("identificacao") or {}
+        slug  = (ident.get("endereco") or "vistoria").replace(" ", "_")[:30]
+        nome_arq = f"Laudo_Vistoria_{dados.get('tipo','').capitalize()}_{slug}.pdf"
+        st.download_button("📄 Baixar Laudo PDF", data=pdf_bytes,
+                            file_name=nome_arq, mime="application/pdf",
+                            use_container_width=True, type="secondary")
+
+    st.divider()
+
+    # ── Salvar e finalizar ───────────────────────────────────────────────────
+    if st.button("💾 Salvar e finalizar", type="primary", use_container_width=True):
+        try:
+            # Gera PDF antes de subir fotos (bytes ainda em memória)
             try:
-                # Gera PDF antes de subir fotos (enquanto bytes ainda estão em memória)
-                try:
-                    _pdf_temp = PDFVIST.gerar_laudo(dados, avaliador=_AVALIADOR,
-                                                     dados_entrada=dados_entrada)
-                    st.session_state[_PDF_CACHE] = _pdf_temp
-                except Exception:
-                    pass
-
-                with st.spinner("Salvando vistoria..."):
-                    vid = _salvar_rascunho()
-                    st.session_state[_K_ID] = vid
-
-                # Upload de fotos — falha não cancela o salvamento
-                try:
-                    with st.spinner("Enviando fotos..."):
-                        comodos_meta = VAN.salvar_fotos_vistoria(
-                            vid, dados.get("comodos") or []
-                        )
-                        dados["comodos"] = comodos_meta
-                except Exception as e_foto:
-                    st.warning(f"⚠️ Fotos não armazenadas: {e_foto}")
-
-                # Marca como concluído independente do resultado das fotos
-                VDB.salvar(dados, user_id=_USER_ID, vistoria_id=vid,
-                           status=VDB.STATUS_CONCLUIDO)
-                st.success(
-                    f"✅ Vistoria #{vid} salva no histórico! "
-                    "Use o histórico para baixar o laudo com fotos."
-                )
-            except Exception as e:
-                st.error(f"Erro ao salvar: {e}")
-
-    with col_pdf:
-        # Usa PDF em cache (gerado antes do upload de fotos) ou gera novo
-        pdf_bytes = st.session_state.get(_PDF_CACHE)
-        if pdf_bytes is None:
-            try:
-                pdf_bytes = PDFVIST.gerar_laudo(dados, avaliador=_AVALIADOR,
+                _pdf_temp = PDFVIST.gerar_laudo(dados, avaliador=_AVALIADOR,
                                                  dados_entrada=dados_entrada)
-            except Exception as e:
-                st.error(f"Erro ao gerar PDF: {e}")
-        if pdf_bytes:
-            ident = dados.get("identificacao") or {}
-            slug  = (ident.get("endereco") or "vistoria").replace(" ", "_")[:30]
-            nome_arq = f"Laudo_Vistoria_{dados.get('tipo','').capitalize()}_{slug}.pdf"
-            st.download_button("📄 Baixar Laudo PDF", data=pdf_bytes,
-                                file_name=nome_arq, mime="application/pdf",
-                                use_container_width=True)
+                st.session_state[_PDF_CACHE] = _pdf_temp
+            except Exception:
+                pass
+
+            with st.spinner("Salvando vistoria..."):
+                vid = _salvar_rascunho()
+                st.session_state[_K_ID] = vid
+
+            # Upload fotos dos cômodos — falha não cancela o salvamento
+            try:
+                with st.spinner("Enviando fotos dos cômodos..."):
+                    comodos_meta = VAN.salvar_fotos_vistoria(
+                        vid, dados.get("comodos") or []
+                    )
+                    dados["comodos"] = comodos_meta
+            except Exception as e_foto:
+                st.warning(f"⚠️ Fotos dos cômodos não armazenadas: {e_foto}")
+
+            # Upload fotos dos medidores
+            try:
+                with st.spinner("Enviando fotos dos medidores..."):
+                    fech_meta = VAN.salvar_fotos_fechamento(
+                        vid, dados.get("fechamento") or {}
+                    )
+                    dados["fechamento"] = fech_meta
+            except Exception as e_med:
+                st.warning(f"⚠️ Fotos dos medidores não armazenadas: {e_med}")
+
+            # Marca como concluído independente do resultado das fotos
+            VDB.salvar(dados, user_id=_USER_ID, vistoria_id=vid,
+                       status=VDB.STATUS_CONCLUIDO)
+            st.success(
+                f"✅ Vistoria #{vid} salva no histórico! "
+                "Use o histórico para baixar o laudo com fotos."
+            )
+        except Exception as e:
+            st.error(f"Erro ao salvar: {e}")
 
     st.divider()
     with st.expander("⚖️ Embasamento legal"):
@@ -773,8 +859,8 @@ def _render_passo_3():
         )
 
     st.divider()
-    if st.button("← Voltar aos Cômodos", use_container_width=is_mobile):
-        _ir_para(2)
+    st.button("← Voltar aos Cômodos", use_container_width=is_mobile,
+              on_click=_cb_ir_para, args=(2,))
 
 
 # ── Roteamento ────────────────────────────────────────────────────────────────

@@ -1,7 +1,8 @@
 """Histórico de vistorias — listar, baixar laudo PDF, excluir."""
 import streamlit as st
 
-from core import vistoria_db as VDB, vistoria_anexos as VAN
+from core import vistoria_db as VDB
+from core import vistoria_anexos as VAN
 from core import pdf_vistoria as PDFVIST
 
 _USER_ID = st.session_state.get("user_id")
@@ -76,6 +77,13 @@ for v in vistorias:
                         dados_vis["comodos"] = comodos_com_bytes
                     except Exception:
                         pass
+                    try:
+                        fech_bytes = VAN.carregar_fotos_fechamento(
+                            dados_vis.get("fechamento") or {}
+                        )
+                        dados_vis["fechamento"] = fech_bytes
+                    except Exception:
+                        pass
                     st.session_state["vistoria"] = dados_vis
                     st.session_state["vistoria_id"] = v["id"]
                     st.session_state["vistoria_passo"] = 1
@@ -94,6 +102,13 @@ for v in vistorias:
                             dados_vis.get("comodos") or []
                         )
                         dados_vis["comodos"] = comodos_bytes
+                    except Exception:
+                        pass
+                    try:
+                        fech_bytes = VAN.carregar_fotos_fechamento(
+                            dados_vis.get("fechamento") or {}
+                        )
+                        dados_vis["fechamento"] = fech_bytes
                     except Exception:
                         pass
 

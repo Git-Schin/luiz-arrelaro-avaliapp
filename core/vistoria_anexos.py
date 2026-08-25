@@ -110,6 +110,70 @@ def carregar_fotos_vistoria(comodos: list[dict]) -> list[dict]:
     return comodos
 
 
+_CAMPOS_MEDIDOR = [
+    ("fotos_agua", "med_agua"),
+    ("fotos_luz",  "med_luz"),
+    ("fotos_gas",  "med_gas"),
+]
+
+
+def salvar_fotos_fechamento(vistoria_id: int, fechamento: dict) -> dict:
+    """Sobe fotos dos medidores para o Storage e substitui bytes por caminho."""
+    pasta = _pasta(vistoria_id)
+    usados: set[str] = set()
+
+    for campo, prefixo in _CAMPOS_MEDIDOR:
+        fotos = fechamento.get(campo) or []
+        fotos_novas: list[dict] = []
+        for f in fotos:
+            data = f.get("bytes")
+            if not data:
+                if f.get("caminho"):
+                    fotos_novas.append({"nome": f.get("nome", ""), "caminho": f["caminho"]})
+                continue
+            nome = _slug(f.get("nome", "foto.jpg"))
+            base, _, ext = nome.rpartition(".")
+            n = f"{prefixo}_{nome}"
+            j = 1
+            while n in usados:
+                n = f"{prefixo}_{base}_{j}.{ext}"
+                j += 1
+            usados.add(n)
+            path = f"{pasta}/{n}"
+            content_type = mimetypes.guess_type(n)[0] or "image/jpeg"
+            _bucket().upload(
+                path=path,
+                file=data,
+                file_options={"content-type": content_type, "upsert": "true"},
+            )
+            fotos_novas.append({"nome": n, "caminho": path})
+        fechamento[campo] = fotos_novas
+
+    return fechamento
+
+
+def carregar_fotos_fechamento(fechamento: dict) -> dict:
+    """Baixa bytes das fotos de medidores que têm caminho mas não têm bytes."""
+    for campo, _ in _CAMPOS_MEDIDOR:
+        fotos = fechamento.get(campo) or []
+        fotos_com_bytes: list[dict] = []
+        for f in fotos:
+            if f.get("bytes"):
+                fotos_com_bytes.append(f)
+                continue
+            caminho = f.get("caminho")
+            if not caminho:
+                continue
+            try:
+                data = _bucket().download(caminho)
+            except Exception:
+                data = None
+            if data:
+                fotos_com_bytes.append({"nome": f.get("nome", ""), "bytes": data})
+        fechamento[campo] = fotos_com_bytes
+    return fechamento
+
+
 def excluir(vistoria_id: int) -> None:
     paths = _listar_paths(vistoria_id)
     if paths:

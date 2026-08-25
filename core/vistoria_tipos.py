@@ -179,6 +179,9 @@ def dados_vistoria_vazio(perfil: dict | None = None) -> dict:
             "medidor_agua": "",
             "medidor_luz": "",
             "medidor_gas": "",
+            "fotos_agua": [],
+            "fotos_luz":  [],
+            "fotos_gas":  [],
             "obs_gerais": "",
         },
     }

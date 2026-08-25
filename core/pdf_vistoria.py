@@ -189,6 +189,12 @@ def _sec_medidores(pdf: _PDF, dados: dict):
         pdf.cell(w, 7, _s(val), border=1, align="C")
     pdf.ln(5)
 
+    # Fotos dos medidores (água, luz, gás)
+    todas_fotos_med = []
+    for key in ("fotos_agua", "fotos_luz", "fotos_gas"):
+        todas_fotos_med.extend(fech.get(key) or [])
+    _embed_fotos(pdf, todas_fotos_med)
+
 
 def _estado_fill(estado: str) -> tuple[int, int, int]:
     cor = ESTADO_COR.get(estado, "#94A3B8")
@@ -491,4 +497,4 @@ def gerar_laudo(dados: dict, avaliador: dict | None = None,
     _sec_disclaimer(pdf, n_obs + 1)
     _sec_assinatura(pdf, dados)
 
-    return pdf.output()
+    return bytes(pdf.output())
