@@ -326,18 +326,57 @@ def _render_passo_1():
 # ── JS: abre câmera nativa ao clicar em file inputs (mobile) ────────────────
 
 def _injetar_capture():
-    """Injeta capture=environment nos file inputs do DOM pai → câmera nativa full-screen."""
+    """Câmera nativa + visual de botão para todos os file_uploaders de foto."""
     components.html(
         """<script>
         (function(){
             var d = window.parent.document;
-            function p(){
+
+            if (!d.getElementById('avaliapp-foto-style')) {
+                var s = d.createElement('style');
+                s.id = 'avaliapp-foto-style';
+                s.textContent = `
+                    [data-testid="stFileUploaderDropzone"] {
+                        background: #10B981 !important;
+                        border: none !important;
+                        border-radius: 10px !important;
+                        min-height: unset !important;
+                        padding: 2px !important;
+                        cursor: pointer !important;
+                    }
+                    [data-testid="stFileUploaderDropzoneInstructions"] {
+                        display: none !important;
+                    }
+                    [data-testid="stFileUploaderDropzone"] button {
+                        background: transparent !important;
+                        color: white !important;
+                        font-size: 17px !important;
+                        font-weight: 700 !important;
+                        width: 100% !important;
+                        border: none !important;
+                        padding: 16px !important;
+                        cursor: pointer !important;
+                        letter-spacing: 0.3px !important;
+                    }
+                    [data-testid="stFileUploaderDropzone"] button:hover {
+                        background: rgba(255,255,255,0.15) !important;
+                    }
+                `;
+                d.head.appendChild(s);
+            }
+
+            function patch(){
                 d.querySelectorAll('input[type="file"]').forEach(function(el){
                     el.setAttribute('capture', 'environment');
                 });
+                d.querySelectorAll('[data-testid="stFileUploaderDropzone"] button').forEach(function(btn){
+                    if (btn.textContent.trim() !== '📷 Tirar Foto') {
+                        btn.textContent = '📷 Tirar Foto';
+                    }
+                });
             }
-            p();
-            new MutationObserver(p).observe(d.body, {childList:true, subtree:true});
+            patch();
+            new MutationObserver(patch).observe(d.body, {childList:true, subtree:true});
         })();
         </script>""",
         height=0,
@@ -353,10 +392,11 @@ def _widget_foto(comodo: dict, item_idx: int, item: dict):
     n_fotos = len(fotos_salvas)
 
     up = st.file_uploader(
-        "📷 Tirar Foto",
+        "foto",
         type=["jpg", "jpeg", "png"],
         accept_multiple_files=False,
         key=f"foto_{cid}_{item_idx}_{n_fotos}",
+        label_visibility="collapsed",
     )
     if up is not None:
         item.setdefault("fotos", []).append({"nome": up.name, "bytes": up.read()})
@@ -737,10 +777,11 @@ def _render_passo_3():
             fotos_med = fech.setdefault(campo_foto, [])
             n_f_med = len([f for f in fotos_med if f.get("bytes") or f.get("caminho")])
             up_med = st.file_uploader(
-                "📷 Foto do medidor",
+                "foto_med",
                 type=["jpg", "jpeg", "png"],
                 accept_multiple_files=False,
                 key=f"{key_val}_foto_{n_f_med}",
+                label_visibility="collapsed",
             )
             if up_med is not None:
                 fotos_med.append({"nome": up_med.name, "bytes": up_med.read()})
