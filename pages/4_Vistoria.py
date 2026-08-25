@@ -260,19 +260,17 @@ def _widget_foto(comodo: dict, item_idx: int, item: dict, mobile: bool):
     if mobile:
         # ── Câmera como primário ──────────────────────────────────────────────
         foto_cam = st.camera_input(
-            "📷 Tirar foto",
+            "📷 Adicionar foto",
             key=f"cam_{cid}_{item_idx}",
-            help="Aponte para o item e capture a foto.",
+            help="Capture uma foto. Pode tirar várias.",
         )
         if foto_cam is not None:
-            item["fotos"] = [{"nome": f"foto_{item['nome'].replace('/', '_')}.jpg",
-                               "bytes": foto_cam.getvalue()}]
-            fotos_salvas = item["fotos"]
-
-        # Preview da foto salva (se câmera ainda não tem nada novo)
-        if not foto_cam and fotos_salvas:
-            st.image(fotos_salvas[0]["bytes"],
-                     caption="✅ Foto registrada", use_container_width=True)
+            n = len(fotos_salvas) + 1
+            item.setdefault("fotos", []).append({
+                "nome": f"foto_{item['nome'].replace('/', '_')}_{n}.jpg",
+                "bytes": foto_cam.getvalue(),
+            })
+            st.rerun()
 
         # Galeria como alternativa
         with st.expander("📁 ou escolher da galeria"):
@@ -283,8 +281,20 @@ def _widget_foto(comodo: dict, item_idx: int, item: dict, mobile: bool):
                 label_visibility="collapsed",
             )
             if up:
-                item["fotos"] = [{"nome": up.name, "bytes": up.read()}]
+                item.setdefault("fotos", []).append({"nome": up.name, "bytes": up.read()})
                 st.rerun()
+
+        # Preview de todas as fotos salvas
+        if fotos_salvas:
+            st.caption(f"📸 {len(fotos_salvas)} foto(s)")
+            for fi, fb in enumerate(fotos_salvas):
+                if fb.get("bytes"):
+                    c_img, c_del = st.columns([5, 1])
+                    c_img.image(fb["bytes"], use_container_width=True)
+                    if c_del.button("🗑️", key=f"del_f_{cid}_{item_idx}_{fi}",
+                                    help="Remover foto"):
+                        item["fotos"].pop(fi)
+                        st.rerun()
 
     else:
         # ── Arquivo como primário (desktop) ───────────────────────────────────
@@ -418,6 +428,16 @@ def _render_item_mobile(comodo: dict, ci: int):
             key=f"obs_comodo_{ci}",
             height=70,
         )
+        # ── Adicionar novo item ───────────────────────────────────────────────
+        with st.expander("➕ Adicionar item ao cômodo"):
+            nome_novo = st.text_input("Nome do item", key=f"novo_item_mob_{ci}",
+                                       placeholder="Ex.: Armário, Rodapé, Ar-condicionado")
+            if st.button("Adicionar", key=f"btn_item_mob_{ci}") and nome_novo.strip():
+                comodo.setdefault("itens", []).append(
+                    {"nome": nome_novo.strip(), "estado": "", "obs": "", "fotos": []}
+                )
+                st.session_state[_K_ITEM] = len(comodo["itens"]) - 1
+                st.rerun()
 
 
 # ── Renderização de um item — DESKTOP (todos os itens visíveis) ───────────────
@@ -657,33 +677,60 @@ def _render_passo_3():
         else:
             st.warning("⚠️ Vistoria de entrada não encontrada — comparativo indisponível.")
 
+    _PDF_CACHE = "vistoria_pdf_cache"
+
     col_salvar, col_pdf = st.columns(2)
     with col_salvar:
         if st.button("💾 Salvar e finalizar", type="primary", use_container_width=True):
             try:
-                with st.spinner("Salvando e subindo fotos..."):
+                # Gera PDF antes de subir fotos (enquanto bytes ainda estão em memória)
+                try:
+                    _pdf_temp = PDFVIST.gerar_laudo(dados, avaliador=_AVALIADOR,
+                                                     dados_entrada=dados_entrada)
+                    st.session_state[_PDF_CACHE] = _pdf_temp
+                except Exception:
+                    pass
+
+                with st.spinner("Salvando vistoria..."):
                     vid = _salvar_rascunho()
-                    comodos_meta = VAN.salvar_fotos_vistoria(vid, dados.get("comodos") or [])
-                    dados["comodos"] = comodos_meta
-                    VDB.salvar(dados, user_id=_USER_ID, vistoria_id=vid,
-                               status=VDB.STATUS_CONCLUIDO)
                     st.session_state[_K_ID] = vid
-                st.success(f"✅ Vistoria #{vid} salva!")
+
+                # Upload de fotos — falha não cancela o salvamento
+                try:
+                    with st.spinner("Enviando fotos..."):
+                        comodos_meta = VAN.salvar_fotos_vistoria(
+                            vid, dados.get("comodos") or []
+                        )
+                        dados["comodos"] = comodos_meta
+                except Exception as e_foto:
+                    st.warning(f"⚠️ Fotos não armazenadas: {e_foto}")
+
+                # Marca como concluído independente do resultado das fotos
+                VDB.salvar(dados, user_id=_USER_ID, vistoria_id=vid,
+                           status=VDB.STATUS_CONCLUIDO)
+                st.success(
+                    f"✅ Vistoria #{vid} salva no histórico! "
+                    "Use o histórico para baixar o laudo com fotos."
+                )
             except Exception as e:
                 st.error(f"Erro ao salvar: {e}")
 
     with col_pdf:
-        try:
-            pdf_bytes = PDFVIST.gerar_laudo(dados, avaliador=_AVALIADOR,
-                                             dados_entrada=dados_entrada)
+        # Usa PDF em cache (gerado antes do upload de fotos) ou gera novo
+        pdf_bytes = st.session_state.get(_PDF_CACHE)
+        if pdf_bytes is None:
+            try:
+                pdf_bytes = PDFVIST.gerar_laudo(dados, avaliador=_AVALIADOR,
+                                                 dados_entrada=dados_entrada)
+            except Exception as e:
+                st.error(f"Erro ao gerar PDF: {e}")
+        if pdf_bytes:
             ident = dados.get("identificacao") or {}
             slug  = (ident.get("endereco") or "vistoria").replace(" ", "_")[:30]
             nome_arq = f"Laudo_Vistoria_{dados.get('tipo','').capitalize()}_{slug}.pdf"
             st.download_button("📄 Baixar Laudo PDF", data=pdf_bytes,
                                 file_name=nome_arq, mime="application/pdf",
                                 use_container_width=True)
-        except Exception as e:
-            st.error(f"Erro ao gerar PDF: {e}")
 
     st.divider()
     with st.expander("⚖️ Embasamento legal"):
